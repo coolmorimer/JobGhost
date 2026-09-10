@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "JobGhost — мост ChatGPT",
+  "version": "0.4.4",
+  "minimum_chrome_version": "116",
+  "description": "Автоматически подключает обычный ChatGPT к локальному JobGhost и убирает служебное окно на фон.",
+  "permissions": ["activeTab", "scripting", "tabs", "alarms", "debugger"],
+  "host_permissions": ["http://127.0.0.1/*", "https://chatgpt.com/*"],
+  "background": {"service_worker": "worker.js", "type": "module"},
+  "action": {"default_title": "JobGhost: состояние подключения"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:8765 ws://127.0.0.1:8765"}
+}

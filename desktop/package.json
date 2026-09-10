@@ -1,0 +1,1 @@
+{"name":"jobghost-desktop","version":"0.1.0","private":true,"main":"main.cjs","scripts":{"setup":"node node_modules/electron/install.js","start":"electron .","smoke":"electron . --smoke"},"devDependencies":{"electron":"^42.0.0"},"dependencies":{"koffi":"^3.2.1"}}

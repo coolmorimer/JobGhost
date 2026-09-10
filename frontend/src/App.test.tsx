@@ -1,0 +1,26 @@
+import {render,screen,cleanup,fireEvent} from '@testing-library/react';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+import {vi,test,expect,afterEach} from 'vitest';
+import App from './App';
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+test('starts with minimal chat and reveals controls only on request',()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({state:'needs_extension'})})));
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><App/></QueryClientProvider>);
+  expect(screen.getByRole('log',{name:'Переписка с помощником'})).toBeTruthy();
+  expect(screen.getByRole('textbox',{name:'Вопрос ChatGPT'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Помощник'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Получить код подключения'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Dashboard'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Разделы'}));
+  expect(screen.getByRole('button',{name:'Помощник'})).toBeTruthy();
+  expect(screen.getByText('Безопасные автоотклики HH')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Закрыть меню'}));
+  fireEvent.click(screen.getByRole('button',{name:'Настройки чата'}));
+  expect(screen.getByRole('heading',{name:'Основные'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'ChatGPT'}));
+  expect(screen.getByRole('heading',{name:'ChatGPT подключается сам'})).toBeTruthy();
+  const video=document.querySelector('video');
+  fireEvent.click(screen.getByRole('button',{name:'Закрыть настройки'}));
+  expect(document.querySelector('video')).toBe(video);
+  expect(screen.queryByRole('heading',{name:'ChatGPT подключается сам'})).toBeNull();
+});

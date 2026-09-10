@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment: {POSTGRES_DB: jobghost, POSTGRES_USER: jobghost, POSTGRES_PASSWORD: jobghost_dev}
+    volumes: [jobghost_pg:/var/lib/postgresql/data]
+    healthcheck: {test: [CMD-SHELL, "pg_isready -U jobghost"], interval: 5s, timeout: 3s, retries: 10}
+  backend:
+    build: ./backend
+    environment: {DATABASE_URL: "postgresql+asyncpg://jobghost:jobghost_dev@postgres/jobghost", DRY_RUN: "true"}
+    ports: ["8765:8765"]
+    depends_on: {postgres: {condition: service_healthy}}
+  frontend:
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [backend]
+volumes: {jobghost_pg: {}}
+
