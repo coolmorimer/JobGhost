@@ -37,6 +37,15 @@ test('compact height follows content within safe work-area limits',()=>{
   assert.equal(window.getBounds().height,700);
   assert.throws(()=>controller.setCompactHeight(Number.NaN),TypeError);
 });
+test('manual compact size is clamped to the current work area',()=>{
+  const {window,controller}=fixture();
+  controller.setCompact(true);
+  controller.setCompactSize(640,420);
+  assert.deepEqual(window.getBounds(),{x:-860,y:0,width:640,height:420});
+  controller.setCompactSize(100,5000);
+  assert.deepEqual(window.getBounds(),{x:-860,y:0,width:340,height:1080});
+  assert.throws(()=>controller.setCompactSize(Number.NaN,300),TypeError);
+});
 test('IPC only trusts own local top frame',()=>{
   const mainFrame={url:'http://127.0.0.1:8765/'};
   const window={webContents:{mainFrame}};

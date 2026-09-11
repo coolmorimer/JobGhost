@@ -10,7 +10,11 @@ async def test_speech_validation_and_question(client, monkeypatch):
     monkeypatch.setattr("app.api.speech.speech.model", object())
     monkeypatch.setattr(
         "app.api.speech.speech.transcribe",
-        lambda content: {"text": "Как работает Python?", "language": "ru", "local": True},
+        lambda content, **kwargs: {
+            "text": "Как работает Python?",
+            "language": "ru",
+            "local": True,
+        },
     )
     assert (await client.post("/api/speech/transcribe", json={"audio": "!!!"})).status_code == 422
     result = await client.post(
@@ -19,6 +23,28 @@ async def test_speech_validation_and_question(client, monkeypatch):
     assert result.status_code == 200
     assert result.json()["is_question"] is True
     assert result.json()["local"] is True
+
+
+async def test_openai_speech_does_not_require_local_model(client, monkeypatch):
+    monkeypatch.setattr("app.api.speech.speech.model", None)
+
+    async def transcribe(content, **kwargs):
+        assert content == b"cloud fixture"
+        assert kwargs["language"] == "ru"
+        return {"text": "Почему нужен event loop?", "language": "ru", "local": False}
+
+    monkeypatch.setattr("app.api.speech.ai_provider.transcribe_audio", transcribe)
+    response = await client.post(
+        "/api/speech/transcribe",
+        json={
+            "audio": base64.b64encode(b"cloud fixture").decode(),
+            "engine": "openai",
+            "language": "ru",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["is_question"] is True
+    assert response.json()["local"] is False
 
 
 async def test_speech_blocks_external_origin(client):

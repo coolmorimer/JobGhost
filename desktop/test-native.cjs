@@ -32,6 +32,9 @@ app.whenReady().then(async()=>{
     ipcMain.handle('jobghost:set-compact-height',(event,value)=>{
       assert.equal(trustedSender(event,win,base),true);return controller.setCompactHeight(value);
     });
+    ipcMain.handle('jobghost:set-compact-size',(event,width,height)=>{
+      assert.equal(trustedSender(event,win,base),true);return controller.setCompactSize(width,height);
+    });
     await win.loadURL(base);
     const before=win.getBounds(), identity=win.webContents.id;
     assert.equal(await win.webContents.executeJavaScript('typeof require'),'undefined');

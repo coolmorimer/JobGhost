@@ -42,6 +42,18 @@ function createWindowController(window, screen, topmost=null) {
       window.setBounds({...current,y,height});
       return this.state();
     },
+    setCompactSize(widthValue,heightValue) {
+      if (!Number.isFinite(widthValue)||!Number.isFinite(heightValue)) throw new TypeError('compact size must be finite');
+      if (!compact) return this.state();
+      const current=window.getBounds();
+      const area=screen.getDisplayMatching(current).workArea;
+      const width=Math.max(340,Math.min(Math.round(widthValue),area.width));
+      const height=Math.max(compactMinHeight,Math.min(Math.round(heightValue),area.height));
+      const x=Math.max(area.x,Math.min(current.x,area.x+area.width-width));
+      const y=Math.max(area.y,Math.min(current.y,area.y+area.height-height));
+      window.setBounds({x,y,width,height});
+      return this.state();
+    },
   };
 }
 function trustedSender(event, window, origin) {

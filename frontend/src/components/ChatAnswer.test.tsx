@@ -2,7 +2,7 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 import {afterEach,expect,test,vi} from 'vitest';
 import {ChatAnswer} from './ChatAnswer';
-afterEach(()=>{cleanup();delete window.jobghostDesktop;vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();localStorage.clear();delete window.jobghostDesktop;vi.unstubAllGlobals();});
 test('native compact mode keeps controls and hides technical status clutter',async()=>{
   const setCompact=vi.fn(async(compact:boolean)=>({compact,alwaysOnTop:compact,failedShortcuts:[]}));
   const quit=vi.fn(async()=>undefined);
@@ -38,6 +38,22 @@ test('repeated desktop ask action cannot send a duplicate pending request',async
   await act(async()=>{finish({answer:'Тестовый ответ, не настоящий AI'});});
   await screen.findByText('Тестовый ответ, не настоящий AI');
   expect(ask).toHaveBeenCalledTimes(1);
+});
+
+test('capture automation preferences survive a renderer remount',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async(path:string)=>({ok:true,json:async()=>path.endsWith('/settings')?{provider:'browser',openai_model:'gpt-4o-mini',openrouter_model:'auto',openai_key_saved:false,openrouter_key_saved:false,openai_models:[]}:{state:'ready'}})));
+  const first=render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
+  await waitFor(()=>expect((screen.getByRole('button',{name:/Автоответ/}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button',{name:/Автоответ/}));
+  fireEvent.click(screen.getByLabelText('Настройки чата'));
+  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
+  fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
+  first.unmount();
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
+  expect(screen.getByRole('button',{name:/Автоответ/}).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByLabelText('Настройки чата'));
+  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
+  expect((screen.getByLabelText(/Добавлять снимок экрана/) as HTMLInputElement).checked).toBe(true);
 });
 
 test('fresh screen is captured only with opt-in and attached to the same question',async()=>{

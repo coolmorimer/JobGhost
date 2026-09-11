@@ -10,6 +10,11 @@ import {Pause,Play,Camera,Menu,ArrowUpRight,Maximize2,Settings2,MessageCircle,Ke
 
 type SettingsTab='general'|'ai'|'hotkeys'|'guide';
 
+function savedBoolean(key:string,fallback:boolean){
+  const value=localStorage.getItem(key);
+  return value===null?fallback:value==='true';
+}
+
 async function request(path: string, body?: unknown) {
   const response = await fetch('/api/ai/' + path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const value = await response.json();
@@ -49,11 +54,11 @@ async function streamAnswer(body:unknown,onDelta:(text:string)=>void){
   return {answer};
 }
 
-export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSource,latestQuestionDetected=true,snapshot, captureStatus, sessionActive=false,onStartSession,onStop,onSnapshot,getSnapshot,onChooseRegion,settingsContent,connectionContent}: {latestQuestion:string;latestQuestionKey?:string|number;latestQuestionSource?:string;latestQuestionDetected?:boolean;snapshot:string; captureStatus?:string;sessionActive?:boolean;onStartSession?:()=>Promise<{screen:boolean;mic:boolean}>;onStop?:()=>void;onSnapshot?:()=>void;getSnapshot?:()=>string;onChooseRegion?:()=>Promise<string>;settingsContent?:ReactNode;connectionContent?:ReactNode}) {
+export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSource,latestQuestionDetected=true,snapshot, captureStatus, captureControls,sessionActive=false,onStartSession,onStop,onSnapshot,getSnapshot,onChooseRegion,settingsContent,connectionContent}: {latestQuestion:string;latestQuestionKey?:string|number;latestQuestionSource?:string;latestQuestionDetected?:boolean;snapshot:string; captureStatus?:string;captureControls?:ReactNode;sessionActive?:boolean;onStartSession?:()=>Promise<{screen:boolean;mic:boolean}>;onStop?:()=>void;onSnapshot?:()=>void;getSnapshot?:()=>string;onChooseRegion?:()=>Promise<string>;settingsContent?:ReactNode;connectionContent?:ReactNode}) {
   const [question, setQuestion] = useState('');
-  const [automatic, setAutomatic] = useState(false);
-  const [attach, setAttach] = useState(false);
-  const [freshScreen,setFreshScreen]=useState(true);
+  const [automatic, setAutomatic] = useState(()=>savedBoolean('jobghost-auto-questions',false));
+  const [attach, setAttach] = useState(()=>savedBoolean('jobghost-attach-screen',false));
+  const [freshScreen,setFreshScreen]=useState(()=>savedBoolean('jobghost-fresh-screen',true));
   const lastAutomatic = useRef<string|number|undefined>(undefined);
   const [handledAutomatic,setHandledAutomatic]=useState<string|number>();
   const [history, setHistory] = useState<AnswerEntry[]>([]);
@@ -61,6 +66,7 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
   const [selected, setSelected] = useState(0);
   const [compact, setCompact] = useState(false);
   const compactRef=useRef(false);
+  const manualCompactSize=useRef(false);
   const compactRoot=useRef<HTMLElement>(null);
   const [showSettings,setShowSettings]=useState(false);
   const [settingsTab,setSettingsTab]=useState<SettingsTab>('general');
@@ -75,6 +81,7 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
     if(!compact||!root||!resize)return;
     let frame=0,last=0;
     const measure=()=>{
+      if(manualCompactSize.current)return;
       cancelAnimationFrame(frame);
       frame=requestAnimationFrame(()=>{
         let height=0;
@@ -122,12 +129,15 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
     mutate({text,region,detectedKey});
   }
   async function toggleSession(){
-    if(sessionActive){onStop?.();setAutomatic(false);return;}
+    if(sessionActive){onStop?.();return;}
     if(!onStartSession||startingSession)return;
     setStartingSession(true);setDesktopError('');
     try{
       const started=await onStartSession();
-      if(started.screen){setAutomatic(true);setAttach(true);setFreshScreen(true);}
+      if(started.screen||started.mic){
+        if(localStorage.getItem('jobghost-auto-questions')===null){setAutomatic(true);localStorage.setItem('jobghost-auto-questions','true');}
+        if(started.screen){setAttach(true);localStorage.setItem('jobghost-attach-screen','true');}
+      }
       else setDesktopError('Сессия не запущена: выберите экран в системном окне.');
     }catch(e){setDesktopError(e instanceof Error?e.message:'Не удалось начать сессию');}
     finally{setStartingSession(false);}
@@ -143,8 +153,23 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
     try {
       const next=!compact;
       if(window.jobghostDesktop) await window.jobghostDesktop.setCompact(next);
+      if(next)manualCompactSize.current=false;
       compactRef.current=next;setCompact(next);setShowSettings(false);setDesktopError('');
     } catch {setDesktopError('Не удалось переключить размер окна');}
+  }
+  function beginCompactResize(event:React.PointerEvent<HTMLSpanElement>){
+    const resize=window.jobghostDesktop?.setCompactSize;
+    if(!resize)return;
+    event.preventDefault();event.stopPropagation();
+    manualCompactSize.current=true;
+    const startX=event.clientX,startY=event.clientY,startWidth=window.innerWidth,startHeight=window.innerHeight;
+    let frame=0;
+    const move=(next:PointerEvent)=>{
+      cancelAnimationFrame(frame);
+      frame=requestAnimationFrame(()=>void resize(startWidth+next.clientX-startX,startHeight+next.clientY-startY).catch(()=>setDesktopError('Не удалось изменить размер окна')));
+    };
+    const finish=()=>{cancelAnimationFrame(frame);window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);};
+    window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish,{once:true});
   }
   useEffect(()=>()=>{if(compactRef.current)void window.jobghostDesktop?.setCompact(false).catch(()=>{});},[]);
   useEffect(()=>window.jobghostDesktop?.onAction(action=>{
@@ -165,6 +190,7 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
   return <section ref={compactRoot} className={`panel ${compact ? 'answer-compact' : 'simple-chat'}`}>
     {!compact && <div className="simple-chat-header"><div><h2>Чат с помощником</h2><span className={status.data?.state==='ready'?'connected':'disconnected'}>{status.data?.label||'ИИ'}: {status.data?.state==='ready'?'готов':'не настроен'}</span></div><div className="simple-chat-tools">{onStartSession&&<button className={`session-button ${sessionActive?'active':''}`} disabled={startingSession} onClick={()=>void toggleSession()}>{sessionActive?<Pause/>:<Play/>}{startingSession?'Запускаю…':sessionActive?'Остановить сессию':'Начать сессию'}</button>}<button className="secondary" onClick={()=>void toggleCompact()}>Скрытый чат поверх окон</button><button className="secondary" aria-label="Настройки чата" onClick={()=>setShowSettings(!showSettings)}><Menu/>Настройки</button></div></div>}
     {compact && <div className="overlay-toolbar"><button className="overlay-pause" disabled={startingSession} onClick={()=>void toggleSession()} aria-label={sessionActive?'Остановить сессию':'Начать сессию'}>{sessionActive?<Pause/>:<Play/>}</button><button disabled={isPending || status.data?.state!=='ready' || !(question.trim()||latestQuestion)} onClick={()=>{const typed=question.trim();submit(typed||latestQuestion,typed?undefined:latestQuestionKey);}}><ArrowUpRight/>Спросить <small>Ctrl+Enter</small></button><button disabled={choosingRegion||isPending} onClick={()=>onChooseRegion?void chooseRegion():onSnapshot?.()}><Camera/>{choosingRegion?'Выбор области…':'Прикрепить скриншот'} <small>Ctrl+Alt+S</small></button><span className="overlay-drag" title="Перетащите окно, удерживая Shift"/><button aria-label="Настройки чата" onClick={()=>setShowSettings(!showSettings)}><Menu/></button></div>}
+    {!compact&&<div className="quick-control-row">{captureControls}<button className={automatic?'active':''} aria-pressed={automatic} disabled={status.data?.state!=='ready'} onClick={()=>{const next=!automatic;setAutomatic(next);localStorage.setItem('jobghost-auto-questions',String(next));}}>⚡ Автоответ <b>{automatic?'ВКЛ':'выкл'}</b></button></div>}
     <div className="chat-settings-drawer" hidden={!showSettings} aria-label="Настройки помощника">
       <div className="chat-settings-heading"><h2>Настройки</h2><button className="settings-close" aria-label="Закрыть настройки" onClick={()=>setShowSettings(false)}><X/></button></div>
       <div className="settings-layout">
@@ -187,9 +213,9 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
             <h3>ИИ и скорость</h3>
             <AIProviderSettings connectionContent={connectionContent} onSaved={()=>void status.refetch()}/>
             <div className="settings-card"><p className="settings-status">{status.data?.message || 'Проверка подключения…'}</p></div>
-            <label className="settings-toggle"><input type="checkbox" disabled={status.data?.state !== 'ready'} checked={automatic} onChange={e=>setAutomatic(e.target.checked)}/><span><b>Автоматические вопросы</b><small>Сразу отправлять распознанные вопросы выбранному ИИ</small></span></label>
-            <label className="settings-toggle"><input type="checkbox" checked={attach} onChange={e=>setAttach(e.target.checked)}/><span><b>Добавлять снимок экрана</b><small>Прикладывать выбранный экран к вопросам</small></span></label>
-            {attach&&<div className="settings-card"><label className="settings-toggle"><input type="checkbox" checked={freshScreen} onChange={e=>setFreshScreen(e.target.checked)}/><span><b>Всегда свежий снимок</b><small>{freshScreen?'Передаётся текущий кадр выбранного экрана или окна.':snapshot?'Будет отправлен последний снимок.':'Сначала сделайте снимок.'}</small></span></label><p>Изображение передаётся в ChatGPT и может остаться в истории чата.</p></div>}
+            <label className="settings-toggle"><input type="checkbox" disabled={status.data?.state !== 'ready'} checked={automatic} onChange={e=>{setAutomatic(e.target.checked);localStorage.setItem('jobghost-auto-questions',String(e.target.checked));}}/><span><b>Автоматические вопросы</b><small>Сразу отправлять только целый вопрос после распознавания паузы</small></span></label>
+            <label className="settings-toggle"><input type="checkbox" checked={attach} onChange={e=>{setAttach(e.target.checked);localStorage.setItem('jobghost-attach-screen',String(e.target.checked));}}/><span><b>Добавлять снимок экрана</b><small>Прикладывать выбранный экран к вопросам</small></span></label>
+            {attach&&<div className="settings-card"><label className="settings-toggle"><input type="checkbox" checked={freshScreen} onChange={e=>{setFreshScreen(e.target.checked);localStorage.setItem('jobghost-fresh-screen',String(e.target.checked));}}/><span><b>Всегда свежий снимок</b><small>{freshScreen?'Передаётся текущий кадр выбранного экрана или окна.':snapshot?'Будет отправлен последний снимок.':'Сначала сделайте снимок.'}</small></span></label><p>Изображение передаётся в ChatGPT и может остаться в истории чата.</p></div>}
           </>}
           {settingsTab==='hotkeys'&&<><h3>Горячие клавиши</h3><div className="hotkey-list"><div><span>Отправить введённый или последний голосовой вопрос</span><kbd>Ctrl + Enter</kbd></div><div><span>Сделать снимок</span><kbd>Ctrl + Alt + S</kbd></div><div><span>Скрыть или вернуть окно</span><kbd>Ctrl + Shift + Space</kbd></div><div><span>Остановить весь захват</span><kbd>Ctrl + Alt + X</kbd></div><div><span>Включить клики насквозь</span><kbd>Ctrl + Alt + M</kbd></div></div><DesktopHotkeys/></>}
           {settingsTab==='guide'&&<><h3>Инструкция</h3><div className="guide-steps"><article><strong>1</strong><div><b>Настройте ИИ</b><p>В разделе «ИИ» выберите OpenRouter, OpenAI или обычный ChatGPT в Chrome.</p></div></article><article><strong>2</strong><div><b>Выберите источник</b><p>В «Основных» включите микрофон, системный звук или выберите область экрана.</p></div></article><article><strong>3</strong><div><b>Включите скрытый чат</b><p>Настройте прозрачность и клики насквозь. Для управления окном удерживайте Shift.</p></div></article><article><strong>4</strong><div><b>Получайте подсказки</b><p>Пишите вручную или включите автоматическую отправку распознанных вопросов.</p></div></article></div><p className="settings-warning">Перед важной демонстрацией проверьте защиту именно в используемой программе записи: разные приложения захватывают окна по-разному.</p></>}
@@ -207,5 +233,6 @@ export function ChatAnswer({latestQuestion,latestQuestionKey,latestQuestionSourc
     {desktopError && <p role="alert">{desktopError}</p>}
     {(error || status.error) && <p role="alert">{error?.message || status.error?.message}</p>}
     {compact && <AnswerHistory entries={history} index={selected} onSelect={setSelected} pendingQuestion={isPending?sentQuestion?.text:undefined} pendingAnswer={streamingAnswer}/>}
+    {compact&&window.jobghostDesktop?.setCompactSize&&<span className="overlay-resize-handle" role="separator" aria-label="Изменить размер скрытого чата" title="Потяните, чтобы изменить размер" onPointerDown={beginCompactResize}/>}
   </section>;
 }

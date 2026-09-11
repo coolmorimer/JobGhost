@@ -85,6 +85,7 @@ else {
       ipcMain.handle('jobghost:window-state',event=>{guard(event);return state();});
       ipcMain.handle('jobghost:set-compact',(event,value)=>{guard(event);controller.setCompact(value);overlay.set({enabled:value});return state();});
       ipcMain.handle('jobghost:set-compact-height',(event,value)=>{guard(event);return controller.setCompactHeight(value);});
+      ipcMain.handle('jobghost:set-compact-size',(event,width,height)=>{guard(event);return controller.setCompactSize(width,height);});
       ipcMain.handle('jobghost:overlay',(event,options)=>{guard(event);if(options && 'enabled' in options)throw Error('Используйте переключение режима');return overlay.set(options);});
       window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame){controller.setCompact(false);overlay.set({enabled:false});}});
       session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(contents === window.webContents && new URL(contents.getURL()).origin === base && ['media', 'display-capture'].includes(permission)));

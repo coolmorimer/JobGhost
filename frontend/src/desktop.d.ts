@@ -11,6 +11,7 @@ declare global {
       getState:()=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[];pointerShortcut?:string|null;askShortcut?:string|null;overlay?:{opacity:number;passthrough:boolean;protection:boolean;protected:boolean};serviceBrowser?:{hidden:number}}>;
       setCompact:(value:boolean)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
       setCompactHeight?:(value:number)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
+      setCompactSize?:(width:number,height:number)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
       onAction:(callback:(action:'ask'|'snapshot'|'stop')=>void)=>()=>void;
     };
   }

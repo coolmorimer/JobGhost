@@ -100,6 +100,28 @@ async def test_openrouter_auto_uses_fastest_free_models(monkeypatch):
     await client.aclose()
 
 
+async def test_openai_audio_transcription_keeps_key_on_backend(monkeypatch):
+    captured = {}
+
+    async def handler(request: httpx.Request):
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("authorization")
+        captured["body"] = (await request.aread()).decode(errors="ignore")
+        return httpx.Response(200, json={"text": "Как работает Kubernetes?"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = AIProviderService(client)
+    monkeypatch.setattr(service, "_key", lambda provider: "secret-test-key")
+    result = await service.transcribe_audio(b"audio", language="ru", context="Контекст")
+    assert result["text"] == "Как работает Kubernetes?"
+    assert result["local"] is False
+    assert captured["url"].endswith("/v1/audio/transcriptions")
+    assert captured["authorization"] == "Bearer secret-test-key"
+    assert "gpt-4o-mini-transcribe" in captured["body"]
+    assert "secret-test-key" not in captured["body"]
+    await client.aclose()
+
+
 def test_openrouter_rejects_paid_or_arbitrary_model():
     assert AIProviderService._valid_openrouter_model("vendor/model:free") is True
     assert AIProviderService._valid_openrouter_model("vendor/model") is False

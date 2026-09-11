@@ -40,7 +40,9 @@ class LocalSpeech:
                 self.error = "Не удалось загрузить локальную модель речи. Проверьте соединение при первой загрузке."
                 raise
 
-    def transcribe(self, content: bytes) -> dict:
+    def transcribe(
+        self, content: bytes, *, language: str | None = None, context: str = ""
+    ) -> dict:
         if self.model is None:
             raise ValueError("Сначала загрузите модель речи")
         from faster_whisper.audio import decode_audio
@@ -51,7 +53,7 @@ class LocalSpeech:
         with self.lock:
             segments, info = self.model.transcribe(
                 audio,
-                language=None,
+                language=language if language in {"ru", "en"} else None,
                 beam_size=1,
                 best_of=1,
                 temperature=0,
@@ -62,7 +64,7 @@ class LocalSpeech:
                 initial_prompt=(
                     "Техническое интервью на русском или английском. Technical interview in "
                     "Russian or English. Python, JavaScript, TypeScript, React, Kubernetes, "
-                    "Docker, SQL, API, DevOps."
+                    f"Docker, SQL, API, DevOps. Предыдущий текст: {context[-500:]}"
                 ),
             )
             text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.7)
@@ -71,6 +73,7 @@ class LocalSpeech:
             "language": info.language,
             "language_probability": round(float(info.language_probability), 3),
             "local": True,
+            "engine": "local",
         }
 
 

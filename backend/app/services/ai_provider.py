@@ -182,6 +182,55 @@ class AIProviderService:
             await self._client.aclose()
             self._client = None
 
+    def has_key(self, provider: str) -> bool:
+        return provider in KEY_ACCOUNTS and bool(self._key(provider))
+
+    async def transcribe_audio(
+        self,
+        content: bytes,
+        *,
+        mime_type: str = "audio/webm",
+        language: str | None = None,
+        context: str = "",
+    ) -> dict[str, Any]:
+        """Transcribe one short clip without exposing the OpenAI key to the renderer."""
+        key = self._key("openai")
+        if not key:
+            raise AIProviderError("Для облачной речи добавьте ключ OpenAI в настройках ИИ")
+        suffix = ".wav" if "wav" in mime_type else ".webm"
+        data: dict[str, str] = {
+            "model": "gpt-4o-mini-transcribe",
+            "response_format": "json",
+            "prompt": (
+                "Техническое интервью на русском или английском. "
+                "Сохраняй названия технологий и вопросительную интонацию. "
+                + context[-500:]
+            ).strip(),
+        }
+        if language in {"ru", "en"}:
+            data["language"] = language
+        client = await self._http()
+        response = await client.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            data=data,
+            files={"file": (f"speech{suffix}", content, mime_type)},
+        )
+        if response.status_code >= 400:
+            raise await self._upstream_error(response, "OpenAI Speech")
+        try:
+            text = str(response.json().get("text", "")).strip()
+        except (ValueError, TypeError) as exc:
+            raise AIProviderError("OpenAI Speech вернул некорректный ответ") from exc
+        detected = language or ("ru" if re.search(r"[а-яё]", text, re.I) else "en")
+        return {
+            "text": text,
+            "language": detected,
+            "language_probability": 1.0 if language else 0.8,
+            "local": False,
+            "engine": "openai",
+        }
+
     async def free_models(self, *, refresh: bool = False) -> list[dict[str, str]]:
         if self._catalog and not refresh and time.monotonic() - self._catalog_at < 600:
             return self._catalog
