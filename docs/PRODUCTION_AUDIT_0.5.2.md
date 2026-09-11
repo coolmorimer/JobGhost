@@ -141,8 +141,6 @@ OpenRouter не гарантирует мгновенный ответ: гене
 - [ ] Crash recovery, single-instance/update races, graceful shutdown активной речи/SSE.
 - [ ] Пилот 5–10 пользователей, сбор только opt-in redacted метрик, исправление P0/P1, затем go/no-go review.
 
-## Критерий готовности production
-
 ## Проверка установщика на рабочем ПК
 
 `JobGhost-Setup-0.5.2.exe`: 2 057 880 849 байт. SHA-256: `2fde401e6e4bc6f4d277ac1f2f5eca32ca0cd484b89b5ee88214cad41525ac02`.
