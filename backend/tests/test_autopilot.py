@@ -45,6 +45,7 @@ async def test_failure_stops_without_retry(monkeypatch):
     await pilot.loop()
     assert pilot.state["status"] == "needs_attention"
     assert pilot.state["enabled"] is False
+    assert pilot.state["error"] == "blocked"
 
 
 async def test_bad_config(client):
@@ -102,3 +103,24 @@ async def test_auto_apply_builds_letter_and_sends_only_one(monkeypatch):
     assert result == {"applied": 1, "skipped": 0}
     assert len(sent) == 1
     assert sent[0][1] == {"confirmed_real": True, "require_score": False}
+    # An existing draft must not be re-generated or reset, even if result is uncertain.
+    from app.db.models import Application
+    async with SessionLocal() as db:
+        application = await db.get(Application, sent[0][0])
+        application.status = "NEEDS_REVIEW"
+        await db.commit()
+    sent.clear()
+    result = await pilot._apply_one(vacancy_ids[:1])
+    assert result == {"applied": 0, "skipped": 1}
+    assert not sent
+    pilot.state.update(prepare_only=True)
+    result = await pilot._apply_one(vacancy_ids[1:])
+    assert result == {"applied": 0, "prepared": 1, "skipped": 0}
+    assert not sent
+
+
+def test_pilot_limits_and_safe_default():
+    config = PilotConfig(query="Python",auto_apply=True,resume_id="resume")
+    assert config.prepare_only is True
+    with pytest.raises(ValueError):
+        PilotConfig(query="Python",daily_limit=51)

@@ -10,6 +10,26 @@ async def collect(stream):
     return "".join([part async for part in stream])
 
 
+async def test_structured_router_excludes_models_without_schema(monkeypatch):
+    captured = {}
+    def handler(request):
+        if request.url.path.endswith('/models'):
+            return httpx.Response(200, json={'data': [
+                {'id':'fast/unsupported:free','pricing':{'prompt':0,'completion':0}},
+                {'id':'valid/structured:free','pricing':{'prompt':0,'completion':0},'supported_parameters':['structured_outputs']},
+            ]})
+        captured.update(json.loads(request.content))
+        return httpx.Response(200,text='data: {"choices":[{"delta":{"content":"{}"}}]}\n\n')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = AIProviderService(client)
+        monkeypatch.setattr(service, 'options', lambda: {'provider':'openrouter','openrouter_model':'auto'})
+        monkeypatch.setattr(service, '_key', lambda _: 'fixture')
+        await collect(service.stream_answer('JSON',None,json_schema={'type':'object'}))
+    assert captured['models'] == ['valid/structured:free']
+    assert captured['provider']['require_parameters'] is True
+    assert captured['response_format']['type'] == 'json_schema'
+
+
 async def test_openrouter_reports_exhausted_output_budget(monkeypatch):
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text='data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n')))
     service = AIProviderService(client)
@@ -192,6 +212,19 @@ async def test_ai_settings_never_return_secret(client, monkeypatch):
 
 async def _async_value(value):
     return value
+
+
+async def test_custom_session_does_not_load_resume(client, monkeypatch):
+    captured = []
+    monkeypatch.setattr("app.api.ai.ai_provider.ensure_ready", lambda: _async_value(None))
+    monkeypatch.setattr("app.api.ai.ai_provider.options", lambda: {"provider": "openrouter"})
+    monkeypatch.setattr("app.api.ai.ai_provider.set_role", captured.append)
+    result = await client.post('/api/ai/session/start', json={"context_mode":"custom", "custom_prompt":"Отвечай кратко", "resume_id":"nonexistent"})
+    assert result.status_code == 200
+    assert result.json()['resume_id'] is None
+    assert 'Отвечай кратко' in captured[0]
+    assert 'РЕЗЮМЕ:' not in captured[0]
+    assert (await client.post('/api/ai/session/start', json={"context_mode":"custom"})).status_code == 422
 
 
 def test_provider_error_is_user_facing():

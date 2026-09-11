@@ -1,6 +1,11 @@
 import {useEffect,useRef} from 'react';
 import Markdown from 'react-markdown';
-export type AnswerEntry = {question:string; answer:string;image?:string};
+export type AnswerSource = {id:string;title:string;chunk:number;source:string};
+export type AnswerEntry = {question:string; answer:string;image?:string;sources?:AnswerSource[]};
+
+function Sources({items}:{items?:AnswerSource[]}){
+  return items?.length ? <details><summary>Использованные материалы ({items.length})</summary><ul>{items.map((s,i)=><li key={i}>{s.title} · фрагмент {s.chunk} · {s.source}</li>)}</ul><small>Наличие источника не гарантирует точность ответа — сверяйте личные факты.</small></details> : null;
+}
 
 function MarkdownAnswer({text,pending=false}:{text:string;pending?:boolean}){
   return <div className={`markdown-answer${pending?' streaming-message':''}`} aria-live="polite">
@@ -37,7 +42,7 @@ export function AnswerHistory({entries, index, onSelect,conversation=false,pendi
   useEffect(()=>{if(answer.current)answer.current.scrollTop=0;},[entries.length,index]);
   if(conversation)return <section ref={log} className="chat-log" role="log" aria-label="Переписка с помощником" aria-live="polite">
     {!entries.length&&!pendingQuestion&&<div className="chat-welcome"><h1>Чем помочь?</h1><p>Напишите вопрос или включите голос в настройках.</p></div>}
-    {entries.map((entry,i)=><div className="chat-turn" key={i}><div className="chat-message user-message"><small>Вы</small>{entry.image&&<img className="chat-sent-image" src={entry.image} alt="Отправленная область экрана"/>}<p>{entry.question}</p></div><div className="chat-message assistant-message"><small>Помощник</small><MarkdownAnswer text={entry.answer}/></div></div>)}
+    {entries.map((entry,i)=><div className="chat-turn" key={i}><div className="chat-message user-message"><small>Вы</small>{entry.image&&<img className="chat-sent-image" src={entry.image} alt="Отправленная область экрана"/>}<p>{entry.question}</p></div><div className="chat-message assistant-message"><small>Помощник</small><MarkdownAnswer text={entry.answer}/><Sources items={entry.sources}/></div></div>)}
     {pendingQuestion&&<div className="chat-turn"><div className="chat-message user-message"><small>Вы</small><p>{pendingQuestion}</p></div><div className="chat-message assistant-message" role="status"><small>Помощник</small><MarkdownAnswer text={pendingAnswer||'Начинаю отвечать…'} pending/></div></div>}
     {recognizedQuestion&&<div className="chat-turn"><div className="chat-message recognized-message"><small>{recognizedQuestionDetected?'Обнаружен вопрос':'Распознана речь'} · {recognizedSource||'голос'}</small><p>{recognizedQuestion}</p></div><div className="chat-message assistant-message" role="status">{recognizedQuestionDetected?'Будет отправлен автоматически, если включён этот режим. ':'Не определено как вопрос. '}Нажмите Ctrl+Enter для ручной отправки.</div></div>}
   </section>;
@@ -51,6 +56,7 @@ export function AnswerHistory({entries, index, onSelect,conversation=false,pendi
     </div>
     <p><b>Вопрос:</b> {entry.question}</p>
     <MarkdownAnswer text={entry.answer} pending={Boolean(pendingQuestion)}/>
-    <small>История хранится только в памяти этой страницы.</small>
+    <Sources items={entry.sources}/>
+    <small>Сохранение истории настраивается в разделе «Подготовка и тренировка».</small>
   </section>;
 }

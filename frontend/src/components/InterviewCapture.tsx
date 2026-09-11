@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChatAnswer } from "./ChatAnswer";
+import { assistantContext, preparationOptions } from "./assistantContext";
 import { ChatPairing } from "./ChatPairing";
 import { RealtimeTranscriber } from "./RealtimeTranscriber";
 import { SerialWorkQueue } from "./SerialWorkQueue";
@@ -67,6 +68,8 @@ export function InterviewCapture() {
     [roleReady, setRoleReady] = useState(""),
     [busy, setBusy] = useState(false),
     [snapshot, setSnapshot] = useState("");
+  const [contextMode, setContextMode] = useState(()=>localStorage.getItem('jobghost-context-mode') || 'resume');
+  const [customPrompt, setCustomPrompt] = useState(()=>localStorage.getItem('jobghost-custom-prompt') || '');
   const [queued, setQueued] = useState(0),
     [dropped, setDropped] = useState(0),
     [speechEnabled, setSpeechEnabled] = useState(() =>
@@ -494,14 +497,14 @@ export function InterviewCapture() {
   async function startSession() {
     setError("");
     setRoleReady("");
-    if (!resumeId) {
+    if (contextMode === 'resume' && !resumeId) {
       setError("Сначала выберите резюме для роли ИИ в настройках.");
       return { screen: false, mic: false };
     }
     const roleResponse = await fetch("/api/ai/session/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resume_id: resumeId }),
+      body: JSON.stringify({...assistantContext(), ...preparationOptions()}),
     });
     const role = await roleResponse.json();
     if (!roleResponse.ok) {
@@ -512,6 +515,8 @@ export function InterviewCapture() {
       );
       return { screen: false, mic: false };
     }
+    sessionStorage.setItem('jobghost-session', role.session_id);
+    window.dispatchEvent(new Event('jobghost-new-session'));
     setRoleReady(`Роль загружена: ${role.resume}`);
     if (!wantScreen && !wantMic) {
       setError(
@@ -694,7 +699,10 @@ export function InterviewCapture() {
       settingsContent={
         <>
           <h2>Роль ИИ</h2>
-          <label>
+          <label>Контекст помощника <select aria-label="Контекст помощника" value={contextMode} disabled={sessionActive} onChange={event=>{setContextMode(event.target.value);localStorage.setItem('jobghost-context-mode',event.target.value);setRoleReady('');}}>
+            <option value="resume">По резюме</option><option value="custom">Свой промпт</option>
+          </select></label>
+          {contextMode === 'custom' ? <label>Свой промпт <textarea aria-label="Свой промпт" rows={7} maxLength={12000} value={customPrompt} disabled={sessionActive} placeholder="Как помощник должен отвечать и какой контекст учитывать" onChange={event=>{setCustomPrompt(event.target.value);localStorage.setItem('jobghost-custom-prompt',event.target.value);setRoleReady('');}}/><small>Резюме не отправляется. Промпт хранится локально и передаётся выбранному ИИ. Для смены контекста остановите сессию.</small></label> : <label>
             Резюме для ответов{" "}
             <select
               aria-label="Резюме для роли ИИ"
@@ -719,11 +727,9 @@ export function InterviewCapture() {
                   </option>
                 ))}
             </select>
-          </label>
+          </label>}
           <p>
-            Роль строится из выбранного резюме. OpenAI и OpenRouter получают её
-            в каждом запросе, ChatGPT — первым сообщением сессии. Контакты
-            исключаются, а выдумывать опыт запрещено.
+            {contextMode === 'custom' ? 'OpenAI и OpenRouter получают ваш промпт в каждом запросе, ChatGPT — в начале сессии. Старые сообщения в браузерном чате не удаляются; для чистого контекста нужен новый чат.' : 'Роль строится из выбранного резюме. OpenAI и OpenRouter получают её в каждом запросе, ChatGPT — первым сообщением сессии. Контакты исключаются, выдумывать опыт запрещено.'}
           </p>
           {roleReady && <p role="status">{roleReady}</p>}
           <h2>Три независимых источника</h2>

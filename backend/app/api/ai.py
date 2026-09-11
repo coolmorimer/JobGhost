@@ -15,6 +15,7 @@ from app.connectors.chat_bridge import chat_bridge
 from app.db.models import Resume
 from app.db.session import get_db
 from app.services.ai_provider import AIProviderError, ai_provider
+from app.services.context import build_context, memory
 from app.services.interview_role import role_prompt
 
 router = APIRouter(prefix="/api/ai", dependencies=[Depends(local_request)])
@@ -32,10 +33,25 @@ class AIQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=16000, pattern=r"\S")
     image: str | None = Field(default=None, max_length=4_000_000)
     resume_id: str | None = Field(default=None, min_length=1, max_length=36)
+    context_mode: Literal["resume", "custom"] = "resume"
+    custom_prompt: str = Field(default="", max_length=12000)
+    session_id: str | None = Field(default=None, max_length=36)
+    document_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class SessionRole(BaseModel):
-    resume_id: str = Field(min_length=1, max_length=36)
+    resume_id: str | None = Field(default=None, min_length=1, max_length=36)
+    context_mode: Literal["resume", "custom"] = "resume"
+    custom_prompt: str = Field(default="", max_length=12000)
+    document_ids: list[str] = Field(default_factory=list, max_length=20)
+    save_history: bool = False
+
+
+def custom_role(text: str) -> str:
+    if not text.strip():
+        raise HTTPException(422, "Введите свой промпт")
+    return ("Не выдумывай личный опыт, достижения и факты о пользователе. "
+            "Если данных недостаточно, сообщи об этом. Используй следующий контекст вместо прежней роли:\n" + text.strip())
 
 
 def checked_image(value: str | None) -> str | None:
@@ -94,12 +110,22 @@ async def status():
 async def ask(data: AIQuestion, db: AsyncSession = Depends(get_db)):
     image = checked_image(data.image)
     role = None
-    if data.resume_id and ai_provider.options()["provider"] != "browser":
+    if data.session_id:
+        pass  # Session configuration is authoritative, not mutable renderer preferences.
+    elif data.context_mode == "custom":
+        role = custom_role(data.custom_prompt)
+    elif data.resume_id and ai_provider.options()["provider"] != "browser":
         resume = await db.get(Resume, data.resume_id)
         if not resume or not resume.is_active or not resume.description.strip():
             raise HTTPException(409, "Выберите действующее резюме в настройках роли")
         role = role_prompt(resume, confirmation=False)
     try:
+        sources = []
+        if data.session_id:
+            state = await memory.get(db, data.session_id)
+            role, sources = await build_context(db, data.question, state["role"], state["document_ids"], state["turns"])
+        elif data.document_ids:
+            role, sources = await build_context(db, data.question, role or "Не выдумывай личный опыт.", data.document_ids)
         await ai_provider.ensure_ready()
     except AIProviderError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -113,10 +139,16 @@ async def ask(data: AIQuestion, db: AsyncSession = Depends(get_db)):
                 yield sse({"type": "delta", "delta": delta})
             if not answer.strip():
                 raise AIProviderError("ИИ вернул пустой ответ")
+            if data.session_id:
+                try:
+                    await memory.append(db, data.session_id, data.question, answer)
+                except HTTPException:
+                    pass  # Session was deleted during streaming; never recreate it.
             current = await ai_provider.status()
             yield sse(
                 {
                     "type": "done",
+                    "sources": sources,
                     "provider": current.get("provider"),
                     "model": current.get("model"),
                     "elapsed_ms": round((time.perf_counter() - started) * 1000),
@@ -134,24 +166,36 @@ async def ask(data: AIQuestion, db: AsyncSession = Depends(get_db)):
 
 @router.post("/session/start")
 async def start_session(data: SessionRole, db: AsyncSession = Depends(get_db)):
-    resume = await db.get(Resume, data.resume_id)
-    if not resume or not resume.is_active or not resume.description.strip():
-        raise HTTPException(409, "Выбранное резюме недоступно или пусто")
+    resume = None
+    if data.context_mode == "custom":
+        prompt = custom_role(data.custom_prompt)
+        confirmation = "Свой промпт загружен"
+    else:
+        resume = await db.get(Resume, data.resume_id) if data.resume_id else None
+        if not resume or not resume.is_active or not resume.description.strip():
+            raise HTTPException(409, "Выбранное резюме недоступно или пусто")
+        prompt = role_prompt(resume, confirmation=False)
+        confirmation = "Роль по резюме загружена"
     try:
+        if data.document_ids:
+            await build_context(db, "Опыт и проекты", prompt, data.document_ids)
         await ai_provider.ensure_ready()
         provider = ai_provider.options()["provider"]
         if provider == "browser":
-            result = await chat_bridge.ask(role_prompt(resume, confirmation=True))
+            result = await chat_bridge.ask(prompt + f"\nНа это сообщение ответь только: {confirmation}.")
             answer = str(result.get("answer", "")).strip()
-            if "роль по резюме загружена" not in answer.lower().replace("ё", "е"):
+            if confirmation.lower() not in answer.lower().replace("ё", "е"):
                 raise AIProviderError("ChatGPT не подтвердил загрузку роли")
         else:
-            ai_provider.set_role(role_prompt(resume, confirmation=False))
-            answer = "Роль по резюме подготовлена."
+            ai_provider.set_role(prompt)
+            answer = confirmation + "."
+        session_id = await memory.create(db, prompt, resume.name if resume else "Свой промпт", data.document_ids, data.save_history)
         return {
+            "session_id": session_id,
             "initialized": True,
-            "resume_id": resume.id,
-            "resume": resume.name,
+            "resume_id": resume.id if resume else None,
+            "resume": resume.name if resume else "Свой промпт",
+            "context_mode": data.context_mode,
             "answer": answer,
             "channel": provider,
         }

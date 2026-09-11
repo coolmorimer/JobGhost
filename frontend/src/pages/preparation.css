@@ -1,0 +1,16 @@
+.preparation {max-width:1100px;margin:auto;line-height:1.55}
+.preparation fieldset {min-width:0;margin:20px 0;padding:22px;border:1px solid #394155;border-radius:16px}
+.preparation legend {font-size:1.2rem;font-weight:650;padding:0 8px}
+.preparation label {display:block;margin:10px 0}
+.preparation input:not([type=checkbox]),.preparation textarea,.preparation select {width:100%;display:block;margin-top:6px}
+.preparation input[type=checkbox] {width:auto;margin-right:10px}
+.preparation textarea {resize:vertical;min-height:90px}
+.preparation details {border-top:1px solid #394155;padding:12px 0;margin-top:12px}
+.preparation summary {cursor:pointer;font-weight:600}
+.preparation pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.preparation button {margin:8px 8px 0 0}
+.prep-row {display:grid;grid-template-columns:2fr 1fr;gap:16px}
+.prep-materials {list-style:none;padding:0}
+.prep-materials li {padding:12px 0;border-bottom:1px solid #394155}
+.prep-error {padding:12px;color:#ffb4b4;border:1px solid #ad4b4b;border-radius:10px}
+@media(max-width:650px){.prep-row{grid-template-columns:1fr}.preparation fieldset{padding:12px}}

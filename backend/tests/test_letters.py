@@ -1,5 +1,39 @@
+import pytest
+
+from app.api.letters import validate_generated_letter
 from app.db.models import Application, Resume, Vacancy
 from app.db.session import SessionLocal
+
+
+def test_letter_rejects_placeholders_and_unsupported_numbers():
+    resume = Resume(name="Python", description="Опыт 2 года")
+    vacancy = Vacancy(title="Python",company="Компания")
+    text = "Разрабатываю сервисы на Python. " * 22
+    validate_generated_letter(text, resume, vacancy)
+    for suffix in [" [Имя]", " Ускорил на 90%."]:
+        with pytest.raises(ValueError):
+            validate_generated_letter(text + suffix, resume, vacancy)
+
+
+@pytest.mark.parametrize("provider", ["openai", "openrouter"])
+async def test_letter_uses_selected_api_not_browser(monkeypatch, provider):
+    from app.api.letters import generate_letter
+    captured = []
+    monkeypatch.setattr("app.api.letters.ai_provider.options", lambda: {"provider": provider})
+
+    async def stream(prompt, image, *, role):
+        captured.append((prompt, image, role))
+        yield "Подтверждённый опыт. "
+        yield "Конец письма."
+
+    async def browser(*args):
+        raise AssertionError("Browser must not be called for API letters")
+
+    monkeypatch.setattr("app.api.letters.ai_provider.stream_answer", stream)
+    monkeypatch.setattr("app.api.letters.chat_browser.ask", browser)
+    assert await generate_letter("Факты резюме") == "Подтверждённый опыт. Конец письма."
+    assert captured[0][0] == "Факты резюме"
+    assert "Не выдумывай" in captured[0][2]
 
 
 async def fixture():

@@ -225,6 +225,22 @@ class Setting(Base):
     value: Mapped[Any] = mapped_column(JSON)
 
 
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    title: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(1000), default="Введено пользователем")
+
+
+class AssistantSession(Base):
+    """Only explicitly saved sessions belong here; ephemeral sessions never touch disk."""
+    __tablename__ = "assistant_context_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

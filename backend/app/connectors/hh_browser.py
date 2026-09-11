@@ -364,7 +364,10 @@ class HHBrowser:
                 request = route.request
                 if (request.method not in {"GET", "HEAD", "OPTIONS"}
                         or "vacancy_response" in urlsplit(request.url).path):
-                    blocked.append(request.url)
+                    # Analytics POSTs may fire while opening a local modal.
+                    # Abort those too, but do not mistake them for a response.
+                    if re.search(r"response|negotiation|apply", urlsplit(request.url).path, re.I) or request.resource_type == "document":
+                        blocked.append(request.url)
                     await route.abort()
                 else:
                     await route.continue_()

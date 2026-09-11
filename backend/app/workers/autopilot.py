@@ -1,14 +1,14 @@
 """Durable single-process HH search with explicit opt-in auto application."""
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import JSON, String, select
+from sqlalchemy import JSON, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.api.hh_browser import SearchInput, search
-from app.api.letters import build_prompt, generate_letter
+from app.api.letters import build_prompt, generate_letter, validate_generated_letter
 from app.connectors.hh_browser import hh_browser
 from app.db.models import Application, Base, Resume, Vacancy
 from app.db.session import SessionLocal
@@ -27,6 +27,11 @@ class PilotConfig(BaseModel):
     interval_minutes: int = Field(default=30, ge=5, le=1440)
     auto_apply: bool = False
     resume_id: str | None = None
+    prepare_only: bool = True
+    daily_limit: int = Field(default=5, ge=1, le=50)
+    excluded_companies: str = Field(default="", max_length=2000)
+    excluded_words: str = Field(default="", max_length=2000)
+    letter_instructions: str = Field(default="", max_length=2000)
 
     @model_validator(mode="after")
     def resume_required_for_applications(self):
@@ -113,6 +118,10 @@ class Autopilot:
             raise ValueError("Для автооткликов не выбрано резюме HH")
         skipped = 0
         async with SessionLocal() as db:
+            today = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+            sent = await db.scalar(select(func.count()).select_from(Application).where(Application.sent_at >= today)) or 0
+            if sent >= self.state.get("daily_limit", 5) and not self.state.get("prepare_only"):
+                return {"applied": 0, "skipped": 0, "message": "Достигнут лимит за 24 часа"}
             resume = await db.get(Resume, resume_id)
             if not resume or not resume.is_active or not resume.hh_resume_id:
                 raise ValueError("Выбранное резюме HH недоступно; автоотклики остановлены")
@@ -124,10 +133,12 @@ class Autopilot:
                 existing = await db.scalar(
                     select(Application).where(Application.vacancy_id == vacancy.id)
                 )
-                if existing and existing.status == "APPLIED":
+                if existing:
                     skipped += 1
                     continue
-                if existing and existing.resume_id != resume.id:
+                companies = [part.strip().lower() for part in self.state.get("excluded_companies", "").split(",") if part.strip()]
+                words = [part.strip().lower() for part in self.state.get("excluded_words", "").split(",") if part.strip()]
+                if any(part in vacancy.company.lower() for part in companies) or any(part in vacancy.title.lower() for part in words):
                     skipped += 1
                     continue
                 detail = await hh_browser.read_vacancy(vacancy.url)
@@ -136,6 +147,9 @@ class Autopilot:
                 vacancy.skills = detail["skills"]
                 vacancy.raw_data = {**vacancy.raw_data, "source": detail["source"]}
                 await db.commit()
+                if any(part in (vacancy.title + " " + vacancy.description).lower() for part in words):
+                    skipped += 1
+                    continue
                 application = await prepare_application(
                     db,
                     ApplicationPrepare(
@@ -145,14 +159,21 @@ class Autopilot:
                         mode="AUTO",
                     ),
                 )
-                answer = await generate_letter(build_prompt(resume, vacancy))
+                prompt = build_prompt(resume, vacancy)
+                instructions = self.state.get("letter_instructions", "").strip()
+                if instructions:
+                    prompt += "\nПОЖЕЛАНИЯ К СТИЛЮ (не источник фактов об опыте):\n" + instructions
+                answer = await generate_letter(prompt)
+                validate_generated_letter(answer, resume, vacancy)
                 if not 600 <= len(answer) <= 1200:
                     raise ValueError(
-                        "ChatGPT вернул некорректную длину письма; автоотклики остановлены"
+                        "ИИ вернул некорректную длину письма; черновик сохранён, проверьте выбранную модель"
                     )
                 application.cover_letter = answer
                 application.status = "PREPARED"
                 await db.commit()
+                if self.state.get("prepare_only"):
+                    return {"applied": 0, "prepared": 1, "skipped": skipped}
                 await send_application(
                     db, application.id, confirmed_real=True, require_score=False
                 )
@@ -180,6 +201,7 @@ class Autopilot:
             # A failed page is not an empty successful search; no blind retry storm.
             message = (
                 getattr(exc, "detail", None)
+                or (str(exc) if isinstance(exc, ValueError) else None)
                 or "Фоновый поиск остановлен. Откройте HH, проверьте вход/капчу и запустите снова."
             )
             self.state.update(

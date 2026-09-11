@@ -42,6 +42,7 @@ class AIProviderService:
         self._lock = asyncio.Lock()
         self._role = ""
         self._catalog: list[dict[str, str]] = []
+        self._structured_catalog: list[dict[str, str]] = []
         self._catalog_at = 0.0
 
     @staticmethod
@@ -248,6 +249,7 @@ class AIProviderService:
             )
             response.raise_for_status()
             models = []
+            structured_models = []
             for item in response.json().get("data", []):
                 pricing = item.get("pricing") or {}
                 output = (item.get("architecture") or {}).get("output_modalities") or ["text"]
@@ -265,11 +267,14 @@ class AIProviderService:
                     and free
                     and not any(marker in searchable for marker in NON_CHAT_MODELS)
                 ):
-                    models.append({"id": model_id, "name": str(item.get("name") or model_id)})
-                if len(models) >= 12:
-                    break
+                    model = {"id": model_id, "name": str(item.get("name") or model_id)}
+                    if len(models) < 12:
+                        models.append(model)
+                    if "structured_outputs" in (item.get("supported_parameters") or []) and len(structured_models) < 12:
+                        structured_models.append(model)
             if models:
                 self._catalog, self._catalog_at = models, time.monotonic()
+                self._structured_catalog = structured_models
         except (httpx.HTTPError, ValueError, TypeError):
             pass
         return self._catalog
@@ -286,7 +291,7 @@ class AIProviderService:
             pass
         return AIProviderError(f"{label}: {message or f'ошибка HTTP {response.status_code}'}"[:600])
 
-    async def _openai_stream(self, question: str, image: str | None, role: str | None = None) -> AsyncIterator[str]:
+    async def _openai_stream(self, question: str, image: str | None, role: str | None = None, max_tokens: int = 700, json_mode: bool = False, json_schema: dict | None = None) -> AsyncIterator[str]:
         options = self.options()
         model = options["openai_model"]
         user_content: list[dict[str, str]] = [{"type": "input_text", "text": question}]
@@ -300,11 +305,15 @@ class AIProviderService:
             "input": [{"role": "user", "content": user_content}],
             "stream": True,
             "store": False,
-            "max_output_tokens": 700,
+            "max_output_tokens": max_tokens,
         }
         if model.startswith("gpt-5"):
             payload["reasoning"] = {"effort": "none"}
             payload["text"] = {"verbosity": "low"}
+        if json_mode:
+            payload.setdefault("text", {})["format"] = {"type": "json_object"}
+        if json_schema:
+            payload.setdefault("text", {})["format"] = {"type": "json_schema", "name": "jobghost_training", "strict": True, "schema": json_schema}
         client = await self._http()
         async with client.stream(
             "POST",
@@ -332,8 +341,10 @@ class AIProviderService:
                     yield str(event["text"])
                 elif event.get("type") == "error":
                     raise AIProviderError(f"OpenAI: {event.get('message') or 'ошибка потока'}")
+                elif event.get("type") in {"response.incomplete", "response.failed"}:
+                    raise AIProviderError("OpenAI не завершил ответ. Сократите запрос или смените модель.")
 
-    async def _openrouter_stream(self, question: str, image: str | None, role: str | None = None) -> AsyncIterator[str]:
+    async def _openrouter_stream(self, question: str, image: str | None, role: str | None = None, max_tokens: int = 4096, json_mode: bool = False, json_schema: dict | None = None) -> AsyncIterator[str]:
         options = self.options()
         selected = options["openrouter_model"]
         user_content: Any = question
@@ -349,12 +360,23 @@ class AIProviderService:
             ],
             "stream": True,
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
             "reasoning": {"effort": "low", "exclude": True},
             "provider": {"sort": "latency", "allow_fallbacks": True},
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        if json_schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "jobghost_training", "strict": True, "schema": json_schema}}
+            payload["provider"]["require_parameters"] = True
+            # Optional reasoning knobs must not exclude otherwise schema-capable endpoints.
+            payload.pop("reasoning", None)
         if selected == "auto":
             fastest = await self.free_models()
+            if json_schema:
+                fastest = self._structured_catalog
+                if not fastest:
+                    raise AIProviderError("Нет доступных бесплатных моделей с поддержкой структуры. Обновите каталог или выберите OpenAI вручную.")
             if fastest:
                 payload["models"] = [item["id"] for item in fastest[:3]]
                 payload["provider"]["sort"] = {"by": "latency", "partition": "none"}
@@ -403,20 +425,20 @@ class AIProviderService:
                         if isinstance(part, dict) and part.get("text"):
                             yield str(part["text"])
 
-    async def stream_answer(self, question: str, image: str | None, *, role: str | None = None) -> AsyncIterator[str]:
+    async def stream_answer(self, question: str, image: str | None, *, role: str | None = None, max_tokens: int | None = None, json_mode: bool = False, json_schema: dict | None = None) -> AsyncIterator[str]:
         async with self._lock:
             await self.ensure_ready()
             provider = self.options()["provider"]
             if provider == "openai":
-                async for delta in self._openai_stream(question, image, role):
+                async for delta in self._openai_stream(question, image, role, max_tokens or 700, json_mode, json_schema):
                     yield delta
             elif provider == "openrouter":
-                async for delta in self._openrouter_stream(question, image, role):
+                async for delta in self._openrouter_stream(question, image, role, max_tokens or 4096, json_mode, json_schema):
                     yield delta
             else:
                 picture = base64.b64decode(image) if image else None
                 try:
-                    result = await chat_bridge.ask(question, picture)
+                    result = await chat_bridge.ask(f"{role}\n\nТЕКУЩИЙ ЗАПРОС:\n{question}" if role else question, picture)
                 except ValueError as exc:
                     raise AIProviderError(str(exc)) from exc
                 answer = str(result.get("answer", ""))
