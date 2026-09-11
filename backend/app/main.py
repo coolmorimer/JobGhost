@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.ai import router as ai_router
 from app.api.autopilot import router as pilot_router
 from app.api.chat_browser import router as chat_router
 from app.api.extension import router as extension_router
@@ -18,6 +19,7 @@ from app.connectors.chat_bridge import chat_bridge as chat_browser
 from app.connectors.hh_browser import hh_browser
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
+from app.services.ai_provider import ai_provider
 from app.services.core import seed
 from app.workers.autopilot import autopilot
 
@@ -35,6 +37,7 @@ async def lifespan(_: FastAPI):
         await autopilot.shutdown()
         await hh_browser.close()
         await chat_browser.close()
+        await ai_provider.close()
 
 
 app = FastAPI(title="JobGhost API", version="0.1.0", lifespan=lifespan)
@@ -48,6 +51,7 @@ app.include_router(router)
 app.include_router(hh_router)
 app.include_router(pilot_router)
 app.include_router(speech_router)
+app.include_router(ai_router)
 app.include_router(chat_router)
 app.include_router(letters_router)
 app.include_router(extension_router)

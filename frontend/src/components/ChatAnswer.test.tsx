@@ -31,7 +31,7 @@ test('repeated desktop ask action cannot send a duplicate pending request',async
   const ask=vi.fn(()=>new Promise(resolve=>{finish=resolve;}));
   vi.stubGlobal('fetch',vi.fn(async(path:string)=>({ok:true,json:()=>path.endsWith('/ask') ? ask() : Promise.resolve({state:'ready'})})));
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="Что такое HTTP?" snapshot=""/></QueryClientProvider>);
-  fireEvent.change(screen.getByLabelText('Вопрос ChatGPT'),{target:{value:'Что такое HTTP?'}});
+  fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Что такое HTTP?'}});
   await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
   act(()=>{listeners.forEach(callback=>callback('ask'));listeners.forEach(callback=>callback('ask'));});
   await waitFor(()=>expect(ask).toHaveBeenCalledTimes(1));
@@ -50,10 +50,10 @@ test('fresh screen is captured only with opt-in and attached to the same questio
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot="" getSnapshot={getSnapshot}/></QueryClientProvider>);
   expect(getSnapshot).not.toHaveBeenCalled();
   fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ChatGPT'}));
+  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
   fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
   expect(getSnapshot).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Вопрос ChatGPT'),{target:{value:'Что на экране?'}});
+  fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Что на экране?'}});
   await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button',{name:'Получить ответ'}));
   await screen.findByText('fixture screen answer');
@@ -66,26 +66,44 @@ test('missing requested screenshot stops before network send',async()=>{
   const fetchMock=vi.fn(async(path:string)=>{paths.push(path);return {ok:true,json:async()=>({state:'ready'})};});vi.stubGlobal('fetch',fetchMock);
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
   fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ChatGPT'}));
+  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
   fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
-  fireEvent.change(screen.getByLabelText('Вопрос ChatGPT'),{target:{value:'Вопрос'}});
+  fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Вопрос'}});
   await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button',{name:'Получить ответ'}));
   await screen.findByText(/Снимка нет/);
   expect(paths.every(path=>!path.endsWith('/ask'))).toBe(true);
 });
 
-test('disconnected state explains automatic connection without asking for a code',async()=>{
-  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({state:'needs_extension'})})));
+test('disconnected state points to AI settings without asking for a code',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({state:'needs_extension',message:'Нужно настроить канал ИИ'})})));
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
-  expect(await screen.findByText(/подключается автоматически/)).toBeTruthy();
+  expect(await screen.findByText(/Нужно настроить канал ИИ/)).toBeTruthy();
   expect(screen.queryByText(/код подключения/i)).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Что делать?'}));
+  fireEvent.click(screen.getByRole('button',{name:'Настроить'}));
   expect(screen.getByRole('heading',{name:'Настройки'})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'ChatGPT'}));
-  expect(screen.getByRole('heading',{name:'ChatGPT'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'ИИ и скорость'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'Инструкция'}));
-  expect(screen.getByText('Запустите JobGhost')).toBeTruthy();
+  expect(screen.getByText('Настройте ИИ')).toBeTruthy();
+});
+
+test('renders streamed answer deltas before the request completes',async()=>{
+  const encoder=new TextEncoder();
+  let release:()=>void=()=>{};
+  const stream=new ReadableStream({start(controller){
+    controller.enqueue(encoder.encode('data: {"type":"delta","delta":"Первый "}\n\n'));
+    release=()=>{controller.enqueue(encoder.encode('data: {"type":"delta","delta":"фрагмент"}\n\ndata: {"type":"done"}\n\n'));controller.close();};
+  }});
+  vi.stubGlobal('fetch',vi.fn(async(path:string)=>path.endsWith('/ask')
+    ?new Response(stream,{headers:{'Content-Type':'text/event-stream'}})
+    :({ok:true,json:async()=>({state:'ready',label:'OpenAI API'})})));
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
+  fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Проверка потока'}});
+  await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button',{name:'Получить ответ'}));
+  expect(await screen.findByText(/Первый/)).toBeTruthy();
+  await act(async()=>release());
+  expect(await screen.findByText('Первый фрагмент')).toBeTruthy();
 });
 
 test('recognized voice question is visible before manual send',async()=>{
@@ -104,7 +122,7 @@ test('ctrl enter sends the latest voice phrase even when it was not detected as 
   }));
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="Tell me about Docker" latestQuestionKey={7} latestQuestionSource="Микрофон · EN" latestQuestionDetected={false} snapshot=""/></QueryClientProvider>);
   await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.keyDown(screen.getByLabelText('Вопрос ChatGPT'),{key:'Enter',ctrlKey:true});
+  fireEvent.keyDown(screen.getByLabelText('Вопрос ИИ'),{key:'Enter',ctrlKey:true});
   await screen.findByText('manual voice answer');
   expect(requests).toHaveLength(1);
   expect(requests[0]).toContain('Tell me about Docker');

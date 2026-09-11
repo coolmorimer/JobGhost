@@ -1,4 +1,4 @@
-param([string]$Version='0.4.4')
+param([string]$Version='0.5.0')
 $ErrorActionPreference='Stop'
 $jobghostRoot=Split-Path -Parent $PSScriptRoot
 $jobghostStage=Join-Path $jobghostRoot ('.jobghost\build-'+[guid]::NewGuid().ToString('N'))

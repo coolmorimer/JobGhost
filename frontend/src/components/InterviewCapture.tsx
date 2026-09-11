@@ -89,7 +89,7 @@ export function InterviewCapture() {
     };
     recorder.onstop = () => {if (generation === epoch.current && stream.getAudioTracks().some(t=>t.readyState === 'live')) recorder.start();};
     recorder.start();
-    timers.current.push(setInterval(() => {if(recorder.state === 'recording') recorder.stop();}, 6000));
+    timers.current.push(setInterval(() => {if(recorder.state === 'recording') recorder.stop();}, 2400));
   }
   recordCurrent.current=record;
   useEffect(()=>{
@@ -164,8 +164,8 @@ export function InterviewCapture() {
   async function startSession(){
     setError('');
     setRoleReady('');
-    if(!resumeId){setError('Сначала выберите резюме для роли ChatGPT в настройках.');return {screen:false,mic:false};}
-    const roleResponse=await fetch('/api/chat-browser/session/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resume_id:resumeId})});
+    if(!resumeId){setError('Сначала выберите резюме для роли ИИ в настройках.');return {screen:false,mic:false};}
+    const roleResponse=await fetch('/api/ai/session/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resume_id:resumeId})});
     const role=await roleResponse.json();
     if(!roleResponse.ok){setError(typeof role.detail==='string'?role.detail:'Не удалось загрузить роль по резюме');return {screen:false,mic:false};}
     setRoleReady(`Роль загружена: ${role.resume}`);
@@ -205,12 +205,12 @@ export function InterviewCapture() {
 
   const latestVoice=transcript.at(-1);
   return <ChatAnswer latestQuestion={latestVoice?.text || ''} latestQuestionKey={latestVoice?.id} latestQuestionSource={latestVoice?`${latestVoice.source} · ${latestVoice.language.toUpperCase()}`:undefined} latestQuestionDetected={latestVoice?.question} snapshot={snapshot} getSnapshot={currentSnapshot} onChooseRegion={chooseRegionSnapshot} onStartSession={startSession} sessionActive={screen||mic} onStop={stop} onSnapshot={takeSnapshot} captureStatus={`Экран: ${screen ? 'ВКЛ' : 'выкл'} · Микрофон: ${mic ? 'ВКЛ' : 'выкл'} · Системный звук: ${systemAudio ? 'ВКЛ' : 'выкл'}${snapshot ? ' · Снимок готов' : ''}${error ? ' · '+error : ''}`} connectionContent={<ChatPairing/>} settingsContent={<>
-    <h2>Роль ChatGPT</h2>
-    <label>Резюме для ответов <select aria-label="Резюме для роли ChatGPT" value={resumeId} disabled={screen||mic} onChange={event=>{setResumeId(event.target.value);localStorage.setItem('jobghost-interview-resume',event.target.value);setRoleReady('');}}><option value="">Выберите резюме</option>{resumes.data?.filter(item=>item.is_active).map(item=><option key={item.id} value={item.id}>{item.name}{item.hh_resume_id?' · HH':''}</option>)}</select></label>
-    <p>При каждом запуске сессии ChatGPT получает профессиональный контекст выбранного резюме. Контакты исключаются, а выдумывать опыт запрещено.</p>
+    <h2>Роль ИИ</h2>
+    <label>Резюме для ответов <select aria-label="Резюме для роли ИИ" value={resumeId} disabled={screen||mic} onChange={event=>{setResumeId(event.target.value);localStorage.setItem('jobghost-interview-resume',event.target.value);setRoleReady('');}}><option value="">Выберите резюме</option>{resumes.data?.filter(item=>item.is_active).map(item=><option key={item.id} value={item.id}>{item.name}{item.hh_resume_id?' · HH':''}</option>)}</select></label>
+    <p>При каждом запуске сессии выбранный ИИ получает профессиональный контекст резюме. Контакты исключаются, а выдумывать опыт запрещено.</p>
     {roleReady&&<p role="status">{roleReady}</p>}
     <h2>Экран и звук</h2>
-    <p>Включайте захват с согласия участников. Аудио распознаётся локально. Текст передаётся в ChatGPT только после подключения моста и включения отправки вопросов ниже.</p>
+    <p>Включайте захват с согласия участников. Аудио распознаётся локально. Текст передаётся выбранному ИИ только после включения отправки вопросов.</p>
     <div className="toolbar">
       <button disabled={busy || screen} onClick={() => capture(true)}>Выбрать экран и системный звук</button>
       <button disabled={busy || mic} onClick={() => capture(false)}>Включить микрофон</button>
@@ -228,7 +228,7 @@ export function InterviewCapture() {
       await fetch('/api/speech/load', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}); await speechStatus.refetch();
     }}>Загрузить модель речи на компьютер</button>
     <label><input type="checkbox" checked={speechEnabled} disabled={screen || mic} onChange={e=>setSpeechEnabled(e.target.checked)}/> Распознавать при следующем включении захвата</label>
-    <p>После загрузки модели включите захват заново. Фрагменты по 6 секунд обрабатываются локально. Вопросы определяются автоматически; последнюю фразу всегда можно отправить вручную через Ctrl+Enter.</p>
+    <p>После загрузки модели включите захват заново. Фрагменты по 2,4 секунды обрабатываются локально в быстром режиме. Вопросы определяются автоматически; последнюю фразу всегда можно отправить вручную через Ctrl+Enter.</p>
     <p role="status">Фрагментов в обработке и очереди: {queued}. Пропущено из-за перегрузки: {dropped}.</p>
     {transcript.map(t => <p key={t.id}><small>{t.source} · {t.language.toUpperCase()}{t.question ? ' · вопрос' : ' · речь'}</small><br/>{t.text}</p>)}
     <button className="secondary" onClick={()=>setTranscript([])}>Очистить текст</button>

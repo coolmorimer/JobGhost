@@ -7,8 +7,9 @@ JobGhost — локальное Windows-приложение для помощи
 - показывает минимальный чат или полупрозрачный overlay поверх окон;
 - захватывает только выбранный пользователем экран/окно и аудио;
 - локально распознаёт русский и английский через Faster Whisper;
-- отправляет текст и выбранный снимок в обычную вкладку ChatGPT через расширение, без OpenAI API;
-- при старте сессии загружает в ChatGPT роль по выбранному резюме без контактных данных;
+- отправляет текст и выбранный снимок в OpenAI API, OpenRouter или обычную вкладку ChatGPT через расширение;
+- показывает ответы OpenAI/OpenRouter потоково, по мере генерации;
+- при старте сессии загружает выбранному ИИ роль по резюме без контактных данных;
 - импортирует данные HH из вошедшего браузера и умеет безопасно подготовить/отправить отклик.
 
 Не входят в допустимый дизайн: обход входа/CAPTCHA/2FA, скрытая кража экрана или микрофона, публикация пользовательских данных, маскировка процесса под системный.
@@ -31,6 +32,7 @@ React (frontend/src)
 
 FastAPI (backend/app)
   ├─ /api/speech/* -> локальный Faster Whisper
+  ├─ /api/ai/* -> выбор провайдера, защищённые ключи и SSE-поток ответа
   ├─ /api/chat-browser/* -> ChatBridge WebSocket
   ├─ /api/hh-browser/* -> браузерный HH connector
   ├─ /api/autopilot/* -> контролируемый цикл HH
@@ -50,6 +52,7 @@ Browser extension (browser-extension)
 |---|---|
 | `backend/app/api` | HTTP/WebSocket контракты и локальная origin-защита |
 | `backend/app/connectors` | ChatGPT, HH и mock-интеграции |
+| `backend/app/services/ai_provider.py` | OpenAI Responses, OpenRouter Chat Completions, выбор быстрых моделей и SSE |
 | `backend/app/services` | доменная логика, письмо, детектор вопроса, речь |
 | `backend/app/workers` | scheduler и HH-автопилот |
 | `backend/app/db` | SQLAlchemy-модели и сессия |
@@ -65,25 +68,26 @@ Browser extension (browser-extension)
 ### Старт интервью
 
 1. Пользователь выбирает резюме в настройках.
-2. `InterviewCapture.startSession()` вызывает `POST /api/chat-browser/session/start`.
+2. `InterviewCapture.startSession()` вызывает `POST /api/ai/session/start`.
 3. Backend читает активное резюме, удаляет контакты и строит недоверенный role prompt.
-4. `ChatBridge.ask()` отправляет роль через уже подключённое расширение.
+4. Для API-провайдеров роль остаётся в памяти backend и входит в каждый запрос; для браузерного режима `ChatBridge.ask()` отправляет её через расширение.
 5. Только после подтверждённого ответа включаются выбор экрана и микрофон.
 
 ### Голосовой вопрос
 
 1. Electron разрешает media/display capture только собственному локальному origin.
-2. `MediaRecorder` создаёт шестисекундные WebM-фрагменты.
+2. `MediaRecorder` создаёт WebM-фрагменты по 2,4 секунды.
 3. `POST /api/speech/transcribe` декодирует звук и запускает multilingual Whisper локально.
 4. `detect_question()` распознаёт русские/английские вопросительные и интервью-команды.
 5. Любая фраза появляется в UI. Определённый вопрос может уйти автоматически; последняя фраза отправляется вручную через `Ctrl+Enter`.
 
-### Запрос в ChatGPT
+### Запрос к ИИ
 
 1. `ChatAnswer` добавляет безопасную инструкцию и необязательный JPEG.
-2. `ChatBridge` сериализует один запрос и ждёт уникальный ответ без автоматического повтора.
-3. Extension выполняет ввод в служебной вкладке ChatGPT.
-4. Ответ возвращается в UI и хранится только в памяти страницы.
+2. `AIProviderService` выбирает OpenAI, OpenRouter или браузерный мост.
+3. OpenAI Responses и OpenRouter Chat Completions возвращают SSE-дельты; UI допечатывает их сразу. OpenRouter auto использует актуальные бесплатные модели, отсортированные по задержке.
+4. В браузерном режиме `ChatBridge` ждёт уникальный ответ без автоматического повтора, после чего UI быстро раскрывает его по словам.
+5. Ответ хранится только в памяти страницы.
 
 ### HH-отклик
 
@@ -99,7 +103,8 @@ Browser extension (browser-extension)
 - Browser login хранится браузером; JobGhost не экспортирует cookies.
 - Выбранное резюме интервью хранится только как локальный ID в `localStorage`.
 - Модель речи хранится в `JOBGHOST_USER_DATA/models` или `.jobghost/models`.
-- Изображение и текст отправляются стороннему ChatGPT только после действия/настройки пользователя.
+- API-ключи хранятся в Windows Credential Manager и не попадают в JSON-настройки или HTTP-ответы.
+- Изображение и текст отправляются выбранному стороннему ИИ только после действия/настройки пользователя.
 
 ## 6. Desktop IPC
 
@@ -128,10 +133,10 @@ Browser extension (browser-extension)
 Сборка установщика:
 
 ```powershell
-./scripts/build-installer.ps1 -Version 0.4.4
+./scripts/build-installer.ps1 -Version 0.5.0
 ```
 
-Результат: `releases/JobGhost-Setup-0.4.4.exe`.
+Результат: `releases/JobGhost-Setup-0.5.0.exe`.
 
 ## 8. Безопасное изменение контрактов
 

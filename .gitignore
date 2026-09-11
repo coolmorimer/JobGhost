@@ -24,3 +24,4 @@ cookies*
 user-resumes/
 transcripts/
 playwright/.auth/
+.playwright-cli/

@@ -30,7 +30,8 @@ class LocalSpeech:
                     device="cpu",
                     compute_type="int8",
                     download_root=str(cache),
-                    cpu_threads=4,
+                    cpu_threads=max(4, min(8, os.cpu_count() or 4)),
+                    num_workers=1,
                 )
                 self.state = "ready"
                 self.error = None
@@ -51,11 +52,12 @@ class LocalSpeech:
             segments, info = self.model.transcribe(
                 audio,
                 language=None,
-                beam_size=3,
-                best_of=3,
+                beam_size=1,
+                best_of=1,
                 temperature=0,
+                without_timestamps=True,
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 250},
+                vad_parameters={"min_silence_duration_ms": 180, "speech_pad_ms": 120},
                 condition_on_previous_text=False,
                 initial_prompt=(
                     "Техническое интервью на русском или английском. Technical interview in "
