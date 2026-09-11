@@ -17,12 +17,13 @@
 
 ## Проверено
 
-- Backend: Ruff, 68 pytest.
-- Frontend: 25 Vitest, ESLint, production build, npm audit.
+- Backend: Ruff, 73 pytest.
+- Frontend: 26 Vitest, ESLint, production build, npm audit.
 - Browser extension: 41 Node test.
-- Desktop: 11 Node test, Electron native/screen/audio pipeline.
+- Desktop: 13 Node test, Electron native/region/screen/audio pipeline.
+- Упакованная версия: обычный и фоновый smoke; CUDA float16; точный английский тестовый вопрос. API-режим не запускает Chrome.
 - Реальная RTX 3060: точный RU-вопрос из 5,57-секундного SAPI fixture распознан за 0,86–1,03 с после окончания фразы.
 - Реальные API: OpenAI Live, четыре быстрые OpenAI-модели, OpenRouter auto и роль по резюме.
 - Реальный Chromium UI: русские настройки и основной сценарий без console errors.
 
-Полный список production-рисков и TODO: [PRODUCTION_AUDIT_0.5.2.md](PRODUCTION_AUDIT_0.5.2.md).
+Полный список production-рисков и TODO: [аудит](https://github.com/coolmorimer/JobGhost/blob/main/docs/PRODUCTION_AUDIT_0.5.2.md).
