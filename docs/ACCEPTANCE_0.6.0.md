@@ -25,7 +25,7 @@
 
 ## Сборка установщика
 
-Inno Setup завершился успешно: `releases/JobGhost-Setup-0.6.0.exe`, 2 066 606 874 байта. SHA-256: `b8ead4da3703862eafe49a6400d06ac875600f2dab3652e14047a027c340274f`. Упакованный server.exe совпадает по SHA-256 с проверенным frozen backend. Новая версия пока не опубликована в GitHub Releases и не установлена поверх рабочей версии.
+Inno Setup завершился успешно: `releases/JobGhost-Setup-0.6.0.exe`, 2 066 606 874 байта. SHA-256: `b8ead4da3703862eafe49a6400d06ac875600f2dab3652e14047a027c340274f`. Упакованный server.exe совпадает по SHA-256 с проверенным frozen backend. Версия опубликована как [предварительный GitHub Release](https://github.com/coolmorimer/JobGhost/releases/tag/v0.6.0); GitHub подтвердил тот же digest. Поверх рабочей версии пользователя автоматически не устанавливалась.
 
 ## Production TODO / ограничения
 
