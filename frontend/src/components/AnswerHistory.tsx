@@ -14,6 +14,25 @@ export function AnswerHistory({entries, index, onSelect,conversation=false,pendi
 }) {
   const log=useRef<HTMLElement>(null);
   const answer=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    const move=(step:number)=>{
+      if(pendingQuestion || !entries.length)return;
+      const next=Math.max(0,Math.min(entries.length-1,index+step));
+      if(next!==index)onSelect(next);
+      if(conversation)log.current?.querySelectorAll('.chat-turn')[next]?.scrollIntoView?.({block:'start'});
+    };
+    const unsubscribe=window.jobghostDesktop?.onAction(action=>{
+      if(action==='previous-answer')move(-1);
+      if(action==='next-answer')move(1);
+    });
+    const keydown=(event:KeyboardEvent)=>{
+      if(window.jobghostDesktop&&!conversation)return;
+      if(!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || !['ArrowLeft','ArrowRight'].includes(event.key))return;
+      event.preventDefault();move(event.key==='ArrowLeft'?-1:1);
+    };
+    window.addEventListener('keydown',keydown);
+    return ()=>{unsubscribe?.();window.removeEventListener('keydown',keydown);};
+  },[entries.length,index,onSelect,pendingQuestion,conversation]);
   useEffect(()=>{if(log.current)log.current.scrollTop=log.current.scrollHeight;},[entries.length,pendingQuestion,pendingAnswer]);
   useEffect(()=>{if(answer.current)answer.current.scrollTop=0;},[entries.length,index]);
   if(conversation)return <section ref={log} className="chat-log" role="log" aria-label="Переписка с помощником" aria-live="polite">
@@ -26,9 +45,9 @@ export function AnswerHistory({entries, index, onSelect,conversation=false,pendi
   if (!entry) return <p>Ответов пока нет. Настройте ИИ и задайте вопрос.</p>;
   return <section ref={answer} aria-label="История ответов">
     <div className="toolbar">
-      <button className="secondary" aria-label="Предыдущий ответ" disabled={Boolean(pendingQuestion)||index === 0} onClick={()=>onSelect(index-1)}>← Назад</button>
+      <button className="secondary" aria-label="Предыдущий ответ" title="Ctrl+←" disabled={Boolean(pendingQuestion)||index === 0} onClick={()=>onSelect(index-1)}>Ctrl+← Назад</button>
       <span role="status">{pendingQuestion?'Ответ сейчас':`${index+1} / ${entries.length}`}</span>
-      <button className="secondary" aria-label="Следующий ответ" disabled={Boolean(pendingQuestion)||index === entries.length-1} onClick={()=>onSelect(index+1)}>Вперёд →</button>
+      <button className="secondary" aria-label="Следующий ответ" title="Ctrl+→" disabled={Boolean(pendingQuestion)||index === entries.length-1} onClick={()=>onSelect(index+1)}>Вперёд Ctrl+→</button>
     </div>
     <p><b>Вопрос:</b> {entry.question}</p>
     <MarkdownAnswer text={entry.answer} pending={Boolean(pendingQuestion)}/>

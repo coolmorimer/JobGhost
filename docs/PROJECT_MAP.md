@@ -117,7 +117,7 @@ Browser extension (browser-extension)
 - `jobghost:overlay` — opacity, click-through, content protection;
 - `jobghost:hide` — скрыть окно без трея, процесс продолжает работу;
 - `jobghost:quit` — полный выход из настроек;
-- `jobghost:action` — ask/snapshot/stop от глобальных горячих клавиш.
+- `jobghost:action` — ask/snapshot/stop/previous-answer/next-answer от глобальных горячих клавиш. Ctrl+Left/Right регистрируются только для видимого compact-окна и освобождаются при его скрытии.
 
 `desktop/chrome-window.cjs` изолирует нативную работу с Chrome. Контроллер не скрывает чужие окна: цель определяется по точному заголовку или уникальным координатам, а дескриптор окна запоминается.
 

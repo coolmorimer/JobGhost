@@ -13,7 +13,7 @@ declare global {
       setCompact:(value:boolean)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
       setCompactHeight?:(value:number)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
       setCompactSize?:(width:number,height:number)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
-      onAction:(callback:(action:'ask'|'snapshot'|'stop')=>void)=>()=>void;
+      onAction:(callback:(action:'ask'|'snapshot'|'stop'|'previous-answer'|'next-answer')=>void)=>()=>void;
     };
   }
 }

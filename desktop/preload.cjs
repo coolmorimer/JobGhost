@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('jobghostDesktop',{
   setCompactHeight:value=>ipcRenderer.invoke('jobghost:set-compact-height',value),
   setCompactSize:(width,height)=>ipcRenderer.invoke('jobghost:set-compact-size',width,height),
   onAction:callback=>{
-    const listener=(_event,action)=>{if(['ask','snapshot','stop'].includes(action)) callback(action);};
+    const listener=(_event,action)=>{if(['ask','snapshot','stop','previous-answer','next-answer'].includes(action)) callback(action);};
     ipcRenderer.on('jobghost:action',listener);
     return ()=>ipcRenderer.removeListener('jobghost:action',listener);
   },

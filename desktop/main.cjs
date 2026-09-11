@@ -66,6 +66,9 @@ else {
       window.once('ready-to-show',()=>{logDesktop('renderer ready');if(!backgroundStart)window.show();});
       controller=createWindowController(window,screen,windowsTopmost(window));
       const failedShortcuts=[];
+      const syncHistory=require('./history-shortcuts.cjs').historyShortcuts(globalShortcut,action=>window.webContents.send('jobghost:action',action));
+      const updateHistory=()=>syncHistory(controller.state().compact && window.isVisible() && !window.isMinimized());
+      window.on('show',updateHistory);window.on('hide',updateHistory);window.on('minimize',updateHistory);window.on('restore',updateHistory);
       let pointerShortcut=null,askShortcut=null;
       overlay=createOverlayController(window,windowsShiftReader());
       const state=()=>({...controller.state(),failedShortcuts,pointerShortcut,askShortcut,overlay:overlay.state(),serviceBrowser:chromeService.state()});
@@ -86,7 +89,7 @@ else {
       ipcMain.handle('jobghost:quit',event=>{guard(event);quitting=true;app.quit();});
       window.on('close',event=>{if(!quitting){event.preventDefault();hideWindow();}});
       ipcMain.handle('jobghost:window-state',event=>{guard(event);return state();});
-      ipcMain.handle('jobghost:set-compact',(event,value)=>{guard(event);controller.setCompact(value);overlay.set({enabled:value});return state();});
+      ipcMain.handle('jobghost:set-compact',(event,value)=>{guard(event);controller.setCompact(value);overlay.set({enabled:value});updateHistory();return state();});
       ipcMain.handle('jobghost:set-compact-height',(event,value)=>{guard(event);return controller.setCompactHeight(value);});
       ipcMain.handle('jobghost:set-compact-size',(event,width,height)=>{guard(event);return controller.setCompactSize(width,height);});
       ipcMain.handle('jobghost:overlay',(event,options)=>{guard(event);if(options && 'enabled' in options)throw Error('Используйте переключение режима');return overlay.set(options);});
