@@ -8,6 +8,7 @@ declare global {
       hide?:()=>Promise<void>;
       quit?:()=>Promise<void>;
       setCapture?:(active:boolean)=>Promise<void>;
+      captureRegion?:()=>Promise<string|null>;
       getState:()=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[];pointerShortcut?:string|null;askShortcut?:string|null;overlay?:{opacity:number;passthrough:boolean;protection:boolean;protected:boolean};serviceBrowser?:{hidden:number}}>;
       setCompact:(value:boolean)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;
       setCompactHeight?:(value:number)=>Promise<{compact:boolean;alwaysOnTop:boolean;failedShortcuts:string[]}>;

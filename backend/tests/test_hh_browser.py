@@ -1,6 +1,28 @@
 import pytest
 
-from app.connectors.hh_browser import vacancy_url
+from app.connectors.hh_browser import HHBrowser, response_form_url, vacancy_url
+
+
+async def test_sent_confirmation_normalizes_nonbreaking_space():
+    class Locator:
+        async def count(self):
+            return 0
+
+        async def inner_text(self):
+            return "Вы\u00a0откликнулись"
+
+    class Page:
+        def locator(self, selector):
+            return Locator()
+
+    assert await HHBrowser._response_sent(Page())
+
+
+def test_response_form_requires_exact_vacancy():
+    assert response_form_url("/applicant/vacancy_response?vacancyId=123", "https://hh.ru/vacancy/123") == "https://hh.ru/applicant/vacancy_response?vacancyId=123"
+    for href in ["", "https://evil.com/applicant/vacancy_response?vacancyId=123", "/applicant/vacancy_response?vacancyId=456", "/vacancy/123", "/applicant/vacancy_response?vacancyId=123&vacancyId=456"]:
+        with pytest.raises(ValueError):
+            response_form_url(href, "https://hh.ru/vacancy/123")
 
 
 @pytest.mark.parametrize(

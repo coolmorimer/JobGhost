@@ -23,6 +23,7 @@ app.whenReady().then(async()=>{
     ipcMain.handle('jobghost:hide',hide);
     ipcMain.handle('jobghost:quit',()=>{});
     ipcMain.handle('jobghost:capture',(_event,active)=>{assert.equal(typeof active,'boolean');});
+    ipcMain.handle('jobghost:capture-region',()=>null);
     ipcMain.handle('jobghost:window-state',event=>{
       assert.equal(trustedSender(event,win,base),true);return {...controller.state(),failedShortcuts:[],pointerShortcut:'Control+Alt+M',overlay:overlay.state()};
     });
@@ -47,6 +48,15 @@ app.whenReady().then(async()=>{
     for(let i=0;i<20&&!await win.webContents.executeJavaScript("!!document.querySelector('.answer-compact')");i++)await new Promise(resolve=>setTimeout(resolve,50));
     for(let i=0;i<20&&win.getBounds().height===700;i++)await new Promise(resolve=>setTimeout(resolve,50));
     assert.ok(win.getBounds().height>=180&&win.getBounds().height<700,'short empty chat must shrink the native overlay');
+    await win.webContents.executeJavaScript(`(()=>{const item=document.createElement('div');item.id='native-long-answer';item.style.cssText='height:850px;flex:0 0 850px';document.querySelector('.answer-compact').append(item);})()`);
+    for(let i=0;i<30&&win.getBounds().height<=700;i++)await new Promise(resolve=>setTimeout(resolve,50));
+    assert.ok(win.getBounds().height>700,'long answer must grow beyond the former 700px cap');
+    assert.ok(win.getBounds().height<=screen.getDisplayMatching(win.getBounds()).workArea.height,'overlay must stay inside work area');
+    const layout=await win.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.answer-compact').getBoundingClientRect();const input=document.querySelector('.question-input').getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:innerHeight,inputTop:input.top,inputBottom:input.bottom};})()`);
+    assert.equal(layout.top,0,'overlay must not inherit the hidden main header offset');
+    assert.ok(layout.bottom<=layout.height+1,'overlay bottom must be inside the native window');
+    assert.ok(layout.inputTop>=0&&layout.inputBottom<layout.height,'voice composer must stay visible');
+    await win.webContents.executeJavaScript("document.querySelector('#native-long-answer')?.remove()");
     require('node:fs').writeFileSync(path.join(__dirname,'../.jobghost/compact-adaptive.png'),(await win.webContents.capturePage()).toPNG());
     assert.equal(await win.webContents.executeJavaScript("getComputedStyle(document.querySelector('.answer-compact')).userSelect"),'none');
     assert.equal(await win.webContents.executeJavaScript("getComputedStyle(document.querySelector('.answer-compact')).overflow"),'hidden');
@@ -92,5 +102,13 @@ app.whenReady().then(async()=>{
     fs.writeFileSync(path.join(__dirname,'../.jobghost/settings-ui.png'),(await win.webContents.capturePage()).toPNG());
     console.log('NATIVE_DESKTOP_TEST_OK: real compact/restore, preload IPC, sandbox, action subscription cleanup');
   } catch(error) {console.error(error);process.exitCode=1;}
-  finally {overlay?.dispose();win?.destroy();app.exit(process.exitCode || 0);}
+  finally {
+    overlay?.dispose();
+    ipcMain.removeHandler('jobghost:capture-region');
+    for (const channel of ['jobghost:hide','jobghost:quit','jobghost:capture','jobghost:window-state','jobghost:set-compact','jobghost:set-compact-height','jobghost:set-compact-size']) {
+      ipcMain.removeHandler(channel);
+    }
+    win?.destroy();
+    app.exit(process.exitCode || 0);
+  }
 });

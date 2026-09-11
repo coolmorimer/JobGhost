@@ -81,3 +81,20 @@ async def test_real_hh_dispatch_uses_selected_resume_and_marks_sent(client, monk
 async def test_prepare_does_not_generate_letter(client):
     response, _ = await prepare_fixture(client)
     assert response.json()["cover_letter"] == ""
+
+
+async def test_uncertain_hh_result_blocks_retry(client, monkeypatch):
+    calls = []
+
+    async def apply(*args):
+        calls.append(args)
+        raise ValueError("HH did not confirm submission")
+
+    monkeypatch.setattr("app.connectors.hh_browser.hh_browser.apply", apply)
+    monkeypatch.setattr(get_settings(), "dry_run", False)
+    response, _ = await prepare_fixture(client, letter="Audit draft; not sent")
+    endpoint = f"/api/applications/{response.json()['id']}/send"
+    assert (await client.post(endpoint)).status_code == 400
+    assert (await client.get('/api/applications')).json()[0]['status'] == 'NEEDS_REVIEW'
+    assert (await client.post(endpoint)).status_code == 400
+    assert len(calls) == 1

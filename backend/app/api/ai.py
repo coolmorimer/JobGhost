@@ -31,6 +31,7 @@ class ProviderSettings(BaseModel):
 class AIQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=16000, pattern=r"\S")
     image: str | None = Field(default=None, max_length=4_000_000)
+    resume_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class SessionRole(BaseModel):
@@ -90,8 +91,14 @@ async def status():
 
 
 @router.post("/ask")
-async def ask(data: AIQuestion):
+async def ask(data: AIQuestion, db: AsyncSession = Depends(get_db)):
     image = checked_image(data.image)
+    role = None
+    if data.resume_id and ai_provider.options()["provider"] != "browser":
+        resume = await db.get(Resume, data.resume_id)
+        if not resume or not resume.is_active or not resume.description.strip():
+            raise HTTPException(409, "Выберите действующее резюме в настройках роли")
+        role = role_prompt(resume, confirmation=False)
     try:
         await ai_provider.ensure_ready()
     except AIProviderError as exc:
@@ -101,7 +108,7 @@ async def ask(data: AIQuestion):
         started = time.perf_counter()
         answer = ""
         try:
-            async for delta in ai_provider.stream_answer(data.question, image):
+            async for delta in ai_provider.stream_answer(data.question, image, role=role):
                 answer += delta
                 yield sse({"type": "delta", "delta": delta})
             if not answer.strip():

@@ -13,8 +13,6 @@ export type VoiceUtterance={
 
 type Pending={text:string;isQuestion:boolean;language:string;fragments:number};
 
-const terminalQuestion=/[?？]\s*$/;
-
 function joinWithoutEcho(previous:string,next:string){
   if(!previous)return next;
   const left=previous.trim();
@@ -49,7 +47,8 @@ export class VoiceUtteranceAssembler{
       language:fragment.language&&fragment.language!=='auto'?fragment.language:this.pending.language,
       fragments:this.pending.fragments+1,
     };
-    if((this.pending.isQuestion&&terminalQuestion.test(this.pending.text))||this.pending.fragments>=6||this.pending.text.length>=700){
+    // An intermediate question mark is not a reliable turn boundary; silence wins.
+    if(this.pending.fragments>=12||this.pending.text.length>=1400){
       return this.finish();
     }
     return {...this.pending,complete:false};

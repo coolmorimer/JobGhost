@@ -86,7 +86,7 @@ async def test_auto_apply_builds_letter_and_sends_only_one(monkeypatch):
         }
 
     async def answer(_prompt):
-        return {"answer": "П" * 700}
+        return "П" * 700
 
     sent = []
 
@@ -94,7 +94,7 @@ async def test_auto_apply_builds_letter_and_sends_only_one(monkeypatch):
         sent.append((application_id, options))
 
     monkeypatch.setattr("app.workers.autopilot.hh_browser.read_vacancy", detail)
-    monkeypatch.setattr("app.workers.autopilot.chat_bridge.ask", answer)
+    monkeypatch.setattr("app.workers.autopilot.generate_letter", answer)
     monkeypatch.setattr("app.workers.autopilot.send_application", send)
     pilot = Autopilot()
     pilot.state.update(auto_apply=True, resume_id=resume_id)

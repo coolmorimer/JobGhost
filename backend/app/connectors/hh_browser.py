@@ -4,7 +4,7 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 from playwright.async_api import BrowserContext, Page, Playwright, TimeoutError, async_playwright
 
@@ -23,6 +23,18 @@ def vacancy_url(value: str) -> str:
     if not match or parsed.port not in (None, 443) or parsed.username:
         raise ValueError("Некорректная ссылка на вакансию")
     return f"https://hh.ru/vacancy/{match[1]}"
+
+
+def response_form_url(href: str, vacancy: str) -> str:
+    target = urljoin("https://hh.ru", href)
+    parsed = urlsplit(target)
+    vacancy_id = vacancy_url(vacancy).rsplit("/", 1)[1]
+    if (parsed.scheme != "https" or parsed.hostname != "hh.ru"
+            or parsed.port not in (None, 443) or parsed.username
+            or parsed.path != "/applicant/vacancy_response"
+            or parse_qs(parsed.query).get("vacancyId") != [vacancy_id]):
+        raise ValueError("Не удалось подтвердить безопасную форму отклика HH; откройте её вручную")
+    return target
 
 
 class HHBrowser:
@@ -250,7 +262,7 @@ class HHBrowser:
             '[data-qa*="response-success"], [data-qa="vacancy-response-link-view-topic"]'
         ).count():
             return True
-        body = (await page.locator("body").inner_text()).lower()
+        body = " ".join((await page.locator("body").inner_text()).lower().split())
         return any(
             phrase in body
             for phrase in ("отклик отправлен", "вы откликнулись", "отклик уже отправлен")
@@ -319,10 +331,11 @@ class HHBrowser:
             if not await button.count() or not await button.is_visible():
                 raise ValueError("HH не показал кнопку отклика для этой вакансии")
             href = await button.get_attribute("href")
+            target = response_form_url(href or "", url)
             return {
                 "state": "ready",
-                "message": "HH готов принять отклик с выбранным резюме",
-                "response_url": href or "",
+                "message": "Вакансия доступна. Резюме и письмо будут проверены в форме перед отправкой.",
+                "response_url": target,
                 "resume_id": resume_id,
             }
 
@@ -342,7 +355,28 @@ class HHBrowser:
             response_button = page.locator(RESPONSE_BUTTON).first
             if not await response_button.count() or not await response_button.is_visible():
                 raise ValueError("HH не показал кнопку отклика")
-            await response_button.click()
+            # Opening a response URL can itself submit a one-click application.
+            # Allow only a local modal to open; block writes/navigation until its
+            # resume and letter have been verified. Never retry a blocked click.
+            blocked = []
+
+            async def guard(route):
+                request = route.request
+                if (request.method not in {"GET", "HEAD", "OPTIONS"}
+                        or "vacancy_response" in urlsplit(request.url).path):
+                    blocked.append(request.url)
+                    await route.abort()
+                else:
+                    await route.continue_()
+
+            await page.route("**/*", guard)
+            try:
+                await response_button.click()
+                await page.wait_for_timeout(700)
+            finally:
+                await page.unroute("**/*", guard)
+            if blocked:
+                raise ValueError("HH предложил быстрый отклик без проверенной формы. Отправьте его вручную; автоматическая отправка заблокирована.")
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=10000)
             except TimeoutError:
@@ -352,7 +386,7 @@ class HHBrowser:
             if current["state"] in {"login_required", "manual_action"}:
                 raise ValueError(current["message"])
             if await self._response_sent(page):
-                return {"id": f"hh:{url.rsplit('/', 1)[1]}", "state": "sent"}
+                raise ValueError("HH уже показывает отправленный отклик; автоматический повтор остановлен")
             await self._select_resume(page, resume_id)
             field = page.locator(LETTER_FIELD)
             if not await field.count() or not await field.first.is_visible():

@@ -8,8 +8,7 @@ from sqlalchemy import JSON, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.api.hh_browser import SearchInput, search
-from app.api.letters import build_prompt
-from app.connectors.chat_bridge import chat_bridge
+from app.api.letters import build_prompt, generate_letter
 from app.connectors.hh_browser import hh_browser
 from app.db.models import Application, Base, Resume, Vacancy
 from app.db.session import SessionLocal
@@ -146,7 +145,7 @@ class Autopilot:
                         mode="AUTO",
                     ),
                 )
-                answer = (await chat_bridge.ask(build_prompt(resume, vacancy)))["answer"].strip()
+                answer = await generate_letter(build_prompt(resume, vacancy))
                 if not 600 <= len(answer) <= 1200:
                     raise ValueError(
                         "ChatGPT вернул некорректную длину письма; автоотклики остановлены"

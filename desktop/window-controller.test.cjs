@@ -34,7 +34,7 @@ test('compact height follows content within safe work-area limits',()=>{
   controller.setCompactHeight(50);
   assert.equal(window.getBounds().height,180);
   controller.setCompactHeight(5000);
-  assert.equal(window.getBounds().height,700);
+  assert.equal(window.getBounds().height,1080);
   assert.throws(()=>controller.setCompactHeight(Number.NaN),TypeError);
 });
 test('manual compact size is clamped to the current work area',()=>{

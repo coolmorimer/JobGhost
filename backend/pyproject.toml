@@ -8,7 +8,8 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.41", "aiosqlite>=0.21", "asyncpg>=0.30",
   "alembic>=1.16", "httpx>=0.28", "apscheduler>=3.11", "mcp>=1.12,<2",
   "keyring>=25.6", "python-multipart>=0.0.20", "qrcode[pil]>=8.2", "playwright>=1.55,<2",
-  "faster-whisper>=1.2,<2"
+  "faster-whisper>=1.2,<2",
+  "nvidia-cublas-cu12>=12.4,<13; sys_platform == 'win32'"
 ]
 [project.optional-dependencies]
 dev = ["pytest>=8.4", "pytest-asyncio>=1.0", "ruff>=0.12", "mypy>=1.16"]

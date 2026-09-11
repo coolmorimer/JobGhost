@@ -5,7 +5,8 @@ describe('VoiceUtteranceAssembler',()=>{
   test('собирает вопрос через границу аудиофрагментов',()=>{
     const value=new VoiceUtteranceAssembler();
     expect(value.add({text:'Как работает асинхронное',isQuestion:true,language:'ru'})).toMatchObject({text:'Как работает асинхронное',complete:false});
-    expect(value.add({text:'программирование в Python?',isQuestion:true,language:'ru'})).toEqual({text:'Как работает асинхронное программирование в Python?',isQuestion:true,language:'ru',complete:true});
+    expect(value.add({text:'программирование в Python?',isQuestion:true,language:'ru'})).toMatchObject({text:'Как работает асинхронное программирование в Python?',isQuestion:true,language:'ru',complete:false});
+    expect(value.add({text:'',isQuestion:false,language:'ru'})).toEqual({text:'Как работает асинхронное программирование в Python?',isQuestion:true,language:'ru',complete:true});
   });
 
   test('пауза завершает реплику даже без вопросительного знака',()=>{

@@ -13,7 +13,8 @@ export function Applications(){
     {data.map(a=><article className="panel" style={{padding:16,marginBottom:12}} key={a.id}>
       <h3>{vacancies.data?.find(v=>v.id===a.vacancy_id)?.title || a.vacancy_id}</h3>
       <p>{statusLabel(a.status)} · {a.dry_run ? 'Тестовый режим' : 'Реальный режим'}</p>
-      {a.status !== 'APPLIED' && <button onClick={()=>setSelected(selected===a.id?'':a.id)}>Письмо и данные отклика</button>}
+      {!['APPLIED','SENDING','NEEDS_REVIEW'].includes(a.status) && <button onClick={()=>setSelected(selected===a.id?'':a.id)}>Письмо и данные отклика</button>}
+      {a.status === 'NEEDS_REVIEW' && <p role="alert">Проверьте отклик в личном кабинете HH. Программа не подтверждает доставку выбранного резюме и письма и не отправит их повторно.</p>}
       {selected===a.id && <LetterEditor key={a.id} id={a.id}/>}
     </article>)}
   </>;

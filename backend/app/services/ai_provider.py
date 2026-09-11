@@ -185,6 +185,10 @@ class AIProviderService:
     def has_key(self, provider: str) -> bool:
         return provider in KEY_ACCOUNTS and bool(self._key(provider))
 
+    def server_key(self, provider: str) -> str:
+        """Return a credential only to trusted backend integrations; never expose it via HTTP."""
+        return self._key(provider) if provider in KEY_ACCOUNTS else ""
+
     async def transcribe_audio(
         self,
         content: bytes,
@@ -282,7 +286,7 @@ class AIProviderService:
             pass
         return AIProviderError(f"{label}: {message or f'ошибка HTTP {response.status_code}'}"[:600])
 
-    async def _openai_stream(self, question: str, image: str | None) -> AsyncIterator[str]:
+    async def _openai_stream(self, question: str, image: str | None, role: str | None = None) -> AsyncIterator[str]:
         options = self.options()
         model = options["openai_model"]
         user_content: list[dict[str, str]] = [{"type": "input_text", "text": question}]
@@ -292,7 +296,7 @@ class AIProviderService:
             )
         payload: dict[str, Any] = {
             "model": model,
-            "instructions": self._role or DEFAULT_INSTRUCTIONS,
+            "instructions": role if role is not None else self._role or DEFAULT_INSTRUCTIONS,
             "input": [{"role": "user", "content": user_content}],
             "stream": True,
             "store": False,
@@ -329,7 +333,7 @@ class AIProviderService:
                 elif event.get("type") == "error":
                     raise AIProviderError(f"OpenAI: {event.get('message') or 'ошибка потока'}")
 
-    async def _openrouter_stream(self, question: str, image: str | None) -> AsyncIterator[str]:
+    async def _openrouter_stream(self, question: str, image: str | None, role: str | None = None) -> AsyncIterator[str]:
         options = self.options()
         selected = options["openrouter_model"]
         user_content: Any = question
@@ -340,18 +344,19 @@ class AIProviderService:
             ]
         payload: dict[str, Any] = {
             "messages": [
-                {"role": "system", "content": self._role or DEFAULT_INSTRUCTIONS},
+                {"role": "system", "content": role if role is not None else self._role or DEFAULT_INSTRUCTIONS},
                 {"role": "user", "content": user_content},
             ],
             "stream": True,
             "temperature": 0.2,
-            "max_tokens": 700,
+            "max_tokens": 4096,
+            "reasoning": {"effort": "low", "exclude": True},
             "provider": {"sort": "latency", "allow_fallbacks": True},
         }
         if selected == "auto":
             fastest = await self.free_models()
             if fastest:
-                payload["models"] = [item["id"] for item in fastest[:4]]
+                payload["models"] = [item["id"] for item in fastest[:3]]
                 payload["provider"]["sort"] = {"by": "latency", "partition": "none"}
             else:
                 payload["model"] = "openrouter/free"
@@ -386,6 +391,10 @@ class AIProviderService:
                         f"OpenRouter: {error.get('message', 'ошибка потока') if isinstance(error, dict) else error}"
                     )
                 choices = event.get("choices") or []
+                if choices and choices[0].get("finish_reason") == "length":
+                    raise AIProviderError(
+                        "OpenRouter: модель исчерпала лимит ответа. Выберите другую бесплатную модель или сократите вопрос."
+                    )
                 content = (choices[0].get("delta") or {}).get("content") if choices else None
                 if isinstance(content, str) and content:
                     yield content
@@ -394,15 +403,15 @@ class AIProviderService:
                         if isinstance(part, dict) and part.get("text"):
                             yield str(part["text"])
 
-    async def stream_answer(self, question: str, image: str | None) -> AsyncIterator[str]:
+    async def stream_answer(self, question: str, image: str | None, *, role: str | None = None) -> AsyncIterator[str]:
         async with self._lock:
             await self.ensure_ready()
             provider = self.options()["provider"]
             if provider == "openai":
-                async for delta in self._openai_stream(question, image):
+                async for delta in self._openai_stream(question, image, role):
                     yield delta
             elif provider == "openrouter":
-                async for delta in self._openrouter_stream(question, image):
+                async for delta in self._openrouter_stream(question, image, role):
                     yield delta
             else:
                 picture = base64.b64decode(image) if image else None

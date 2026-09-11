@@ -5,6 +5,8 @@ const {registerFirst}=require('./shortcuts.cjs');
 const {windowsTopmost}=require('./topmost.cjs');
 const {launchChatBrowser}=require('./browser-launcher.cjs');
 const {windowsChromeService}=require('./chrome-window.cjs');
+const {screenSourceForDisplay}=require('./capture-source.cjs');
+const {captureRegion}=require('./region-capture.cjs');
 const {spawn} = require('node:child_process');
 const path = require('node:path');
 const port=Number(process.env.JOBGHOST_PORT || 8765);
@@ -80,6 +82,7 @@ else {
       ipcMain.handle('jobghost:extension-folder',async event=>{guard(event);const error=await shell.openPath(extensionFolder);if(error)throw Error(error);return extensionFolder;});
       ipcMain.handle('jobghost:hide',event=>{guard(event);hideWindow();});
       ipcMain.handle('jobghost:capture',(event,active)=>{guard(event);if(typeof active!=='boolean')throw TypeError('Ожидается состояние захвата');return state();});
+      ipcMain.handle('jobghost:capture-region',event=>{guard(event);return captureRegion(window);});
       ipcMain.handle('jobghost:quit',event=>{guard(event);quitting=true;app.quit();});
       window.on('close',event=>{if(!quitting){event.preventDefault();hideWindow();}});
       ipcMain.handle('jobghost:window-state',event=>{guard(event);return state();});
@@ -92,6 +95,11 @@ else {
       session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
         try {
           if (new URL(request.frame.url).origin !== base) return callback({});
+          if (!request.audioRequested) {
+            const sources = await desktopCapturer.getSources({types:['screen']});
+            const source = screenSourceForDisplay(sources, screen.getDisplayMatching(window.getBounds()));
+            return callback(source ? {video:source} : {});
+          }
           const sources = await desktopCapturer.getSources({types:['screen','window']});
           const choice = await dialog.showMessageBox(window, {type:'question', title:'Захват экрана', message:'Выберите экран или окно для JobGhost', detail:'При запросе звука будет доступен системный звук всего компьютера. Используйте только с согласия участников разговора.', buttons:['Отмена', ...sources.map(s=>s.name)], defaultId:0, cancelId:0, noLink:true});
           if (!choice.response) return callback({});
@@ -107,7 +115,9 @@ else {
         logDesktop('BACKGROUND_SMOKE_OK window remained hidden');
         app.quit();return;
       }
-      if(app.isPackaged&&!process.argv.includes('--smoke'))void (async()=>{
+    if(app.isPackaged&&!process.argv.includes('--smoke'))void (async()=>{
+      const provider=await fetch(base+'/api/ai/settings').then(r=>r.json()).then(v=>v.provider).catch(()=>null);
+      if(provider!=='browser')return;
         for(let attempt=0;attempt<20;attempt++){
           await new Promise(resolve=>setTimeout(resolve,500));
           const ready=await fetch(base+'/api/chat-browser/status').then(r=>r.json()).then(v=>v.state==='ready').catch(()=>false);

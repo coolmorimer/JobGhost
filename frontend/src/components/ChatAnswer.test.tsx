@@ -45,30 +45,22 @@ test('capture automation preferences survive a renderer remount',async()=>{
   const first=render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
   await waitFor(()=>expect((screen.getByRole('button',{name:/Автоответ/}) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button',{name:/Автоответ/}));
-  fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
-  fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
   first.unmount();
-  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot="" onSnapshot={()=>undefined}/></QueryClientProvider>);
   expect(screen.getByRole('button',{name:/Автоответ/}).getAttribute('aria-pressed')).toBe('true');
-  fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
-  expect((screen.getByLabelText(/Добавлять снимок экрана/) as HTMLInputElement).checked).toBe(true);
 });
 
-test('fresh screen is captured only with opt-in and attached to the same question',async()=>{
-  const getSnapshot=vi.fn(()=>'data:image/jpeg;base64,/9j/2Q==');
+test('screen is captured only after the explicit full-screen action',async()=>{
+  const getSnapshot=vi.fn(async()=>'data:image/jpeg;base64,/9j/2Q==');
   const requests:{question:string;image:string|null}[]=[];
   vi.stubGlobal('fetch',vi.fn(async(path:string,options?:RequestInit)=>{
     if(path.endsWith('/ask'))requests.push(JSON.parse(String(options?.body)));
     return {ok:true,json:async()=>path.endsWith('/ask')?{answer:'fixture screen answer'}:{state:'ready'}};
   }));
-  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot="" getSnapshot={getSnapshot}/></QueryClientProvider>);
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot="" onCaptureFullScreen={getSnapshot}/></QueryClientProvider>);
   expect(getSnapshot).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
-  fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
-  expect(getSnapshot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:/Прикрепить весь экран/}));
+  await waitFor(()=>expect(getSnapshot).toHaveBeenCalledTimes(1));
   fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Что на экране?'}});
   await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button',{name:'Получить ответ'}));
@@ -77,17 +69,12 @@ test('fresh screen is captured only with opt-in and attached to the same questio
   expect(requests[0].image).toBe('/9j/2Q==');expect(requests[0].question).toContain('Что на экране?');
 });
 
-test('missing requested screenshot stops before network send',async()=>{
+test('missing requested screenshot does not attach anything or send by itself',async()=>{
   const paths:string[]=[];
   const fetchMock=vi.fn(async(path:string)=>{paths.push(path);return {ok:true,json:async()=>({state:'ready'})};});vi.stubGlobal('fetch',fetchMock);
-  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot=""/></QueryClientProvider>);
-  fireEvent.click(screen.getByLabelText('Настройки чата'));
-  fireEvent.click(screen.getByRole('button',{name:'ИИ'}));
-  fireEvent.click(screen.getByLabelText(/Добавлять снимок экрана/));
-  fireEvent.change(screen.getByLabelText('Вопрос ИИ'),{target:{value:'Вопрос'}});
-  await waitFor(()=>expect((screen.getByRole('button',{name:'Получить ответ'}) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole('button',{name:'Получить ответ'}));
-  await screen.findByText(/Снимка нет/);
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="" snapshot="" onSnapshot={()=>undefined}/></QueryClientProvider>);
+  fireEvent.click(screen.getByRole('button',{name:/Прикрепить весь экран/}));
+  await screen.findByText(/Снимок не получен/);
   expect(paths.every(path=>!path.endsWith('/ask'))).toBe(true);
 });
 
@@ -125,9 +112,23 @@ test('renders streamed answer deltas before the request completes',async()=>{
 test('recognized voice question is visible before manual send',async()=>{
   vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({state:'ready'})})));
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="Как работает HTTP?" latestQuestionKey={1} latestQuestionSource="Микрофон" snapshot=""/></QueryClientProvider>);
-  expect(await screen.findByText('Как работает HTTP?')).toBeTruthy();
+  expect((await screen.findAllByText('Как работает HTTP?')).length).toBeGreaterThan(0);
+  expect((screen.getByLabelText('Вопрос ИИ') as HTMLTextAreaElement).value).toBe('Как работает HTTP?');
   expect(screen.getByText(/Обнаружен вопрос · Микрофон/)).toBeTruthy();
   expect(screen.getAllByText(/Ctrl\+Enter/).length).toBeGreaterThan(0);
+});
+
+test('compact mode keeps the spoken question visible after the answer',async()=>{
+  window.jobghostDesktop={getState:async()=>({compact:false,alwaysOnTop:false,failedShortcuts:[]}),setCompact:async compact=>({compact,alwaysOnTop:compact,failedShortcuts:[]}),onAction:()=>()=>{}};
+  vi.stubGlobal('fetch',vi.fn(async(path:string)=>({ok:true,json:async()=>path.endsWith('/ask')?{answer:'Ответ готов'}:{state:'ready'}})));
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ChatAnswer latestQuestion="Как работает event loop?" latestQuestionKey={11} latestQuestionSource="Собеседник" snapshot=""/></QueryClientProvider>);
+  fireEvent.click(screen.getByText('Скрытый чат поверх окон'));
+  const input=screen.getByLabelText('Вопрос ИИ') as HTMLTextAreaElement;
+  expect(input.value).toBe('Как работает event loop?');
+  await waitFor(()=>expect((screen.getByText('Спросить').closest('button') as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.keyDown(input,{key:'Enter',ctrlKey:true});
+  await screen.findByText('Ответ готов');
+  expect(input.value).toBe('Как работает event loop?');
 });
 
 test('ctrl enter sends the latest voice phrase even when it was not detected as a question',async()=>{

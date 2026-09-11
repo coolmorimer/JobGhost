@@ -2,7 +2,7 @@
   #error SourceDir must point to a prepared build. Run scripts/build-installer.ps1.
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.5.1"
+  #define AppVersion "0.5.2"
 #endif
 [Setup]
 AppId={{EDE20F29-7DD6-4C38-A6AE-0EE02B6EF310}
@@ -16,8 +16,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\releases
 OutputBaseFilename=JobGhost-Setup-{#AppVersion}
-Compression=lzma2/fast
+Compression=lzma2/ultra64
 SolidCompression=yes
+LZMAUseSeparateProcess=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\JobGhost.exe

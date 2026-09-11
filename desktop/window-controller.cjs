@@ -3,7 +3,7 @@ function createWindowController(window, screen, topmost=null) {
   let saved = null;
   const compactWidth = 860;
   const compactMinHeight = 180;
-  const compactMaxHeight = 700;
+  const compactInitialHeight = 700;
   return {
     state: () => ({compact, alwaysOnTop:topmost?topmost.get():window.isAlwaysOnTop()}),
     setCompact(value) {
@@ -13,7 +13,7 @@ function createWindowController(window, screen, topmost=null) {
         saved = {bounds:window.getBounds(), maximized:window.isMaximized(), top:window.isAlwaysOnTop()};
         if (saved.maximized) window.unmaximize();
         const area=screen.getDisplayMatching(saved.bounds).workArea;
-        const width=Math.min(compactWidth,area.width), height=Math.min(compactMaxHeight,area.height);
+        const width=Math.min(compactWidth,area.width), height=Math.min(compactInitialHeight,area.height);
         window.setMinimumSize(340,compactMinHeight);
         window.setBounds({x:area.x+area.width-width,y:area.y,width,height});
         window.setSkipTaskbar(true);
@@ -37,7 +37,7 @@ function createWindowController(window, screen, topmost=null) {
       if (!compact) return this.state();
       const current=window.getBounds();
       const area=screen.getDisplayMatching(current).workArea;
-      const height=Math.max(compactMinHeight,Math.min(Math.round(value),compactMaxHeight,area.height));
+      const height=Math.max(compactMinHeight,Math.min(Math.round(value),area.height));
       const y=Math.max(area.y,Math.min(current.y,area.y+area.height-height));
       window.setBounds({...current,y,height});
       return this.state();

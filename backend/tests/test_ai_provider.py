@@ -1,12 +1,23 @@
 import json
 
 import httpx
+import pytest
 
 from app.services.ai_provider import AIProviderError, AIProviderService
 
 
 async def collect(stream):
     return "".join([part async for part in stream])
+
+
+async def test_openrouter_reports_exhausted_output_budget(monkeypatch):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text='data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n')))
+    service = AIProviderService(client)
+    monkeypatch.setattr(service, "options", lambda: {"provider": "openrouter", "openrouter_model": "vendor/model:free"})
+    monkeypatch.setattr(service, "_key", lambda provider: "test-key")
+    with pytest.raises(AIProviderError, match="исчерпала лимит"):
+        await collect(service._openrouter_stream("test", None))
+    await client.aclose()
 
 
 async def test_openai_responses_are_streamed_and_not_stored(monkeypatch):
@@ -36,10 +47,12 @@ async def test_openai_responses_are_streamed_and_not_stored(monkeypatch):
         },
     )
     monkeypatch.setattr(service, "_key", lambda provider: "test-key")
+    service.set_role("Роль из выбранного резюме")
     assert await collect(service.stream_answer("Что такое API?", None)) == "Очень быстро"
     assert captured["model"] == "gpt-4o-mini"
     assert captured["stream"] is True
     assert captured["store"] is False
+    assert captured["instructions"] == "Роль из выбранного резюме"
     assert captured["input"][0]["content"][0]["type"] == "input_text"
     await client.aclose()
 
@@ -62,6 +75,24 @@ async def test_openrouter_auto_uses_fastest_free_models(monkeypatch):
                         {
                             "id": "fast/model:free",
                             "name": "Fast Free",
+                            "pricing": {"prompt": 0, "completion": 0},
+                            "architecture": {"output_modalities": ["text"]},
+                        },
+                        {
+                            "id": "fast/model-two:free",
+                            "name": "Fast Free Two",
+                            "pricing": {"prompt": 0, "completion": 0},
+                            "architecture": {"output_modalities": ["text"]},
+                        },
+                        {
+                            "id": "fast/model-three:free",
+                            "name": "Fast Free Three",
+                            "pricing": {"prompt": 0, "completion": 0},
+                            "architecture": {"output_modalities": ["text"]},
+                        },
+                        {
+                            "id": "fast/model-four:free",
+                            "name": "Fast Free Four",
                             "pricing": {"prompt": 0, "completion": 0},
                             "architecture": {"output_modalities": ["text"]},
                         },
@@ -94,9 +125,20 @@ async def test_openrouter_auto_uses_fastest_free_models(monkeypatch):
         },
     )
     monkeypatch.setattr(service, "_key", lambda provider: "test-key")
+    service.set_role("Роль из выбранного резюме")
     assert await collect(service.stream_answer("Вопрос", None)) == "Поток работает"
-    assert captured["models"] == ["fast/model:free"]
+    assert captured["models"] == [
+        "fast/model:free",
+        "fast/model-two:free",
+        "fast/model-three:free",
+    ]
     assert captured["provider"]["sort"] == {"by": "latency", "partition": "none"}
+    assert captured["max_tokens"] == 4096
+    assert captured["reasoning"] == {"effort": "low", "exclude": True}
+    assert captured["messages"][0] == {
+        "role": "system",
+        "content": "Роль из выбранного резюме",
+    }
     await client.aclose()
 
 
@@ -154,3 +196,30 @@ async def _async_value(value):
 
 def test_provider_error_is_user_facing():
     assert str(AIProviderError("Нет ключа")) == "Нет ключа"
+
+
+async def test_session_start_installs_resume_role_for_api_requests(client, monkeypatch):
+    captured = {}
+
+    async def ready():
+        return None
+
+    monkeypatch.setattr("app.api.ai.ai_provider.ensure_ready", ready)
+    monkeypatch.setattr(
+        "app.api.ai.ai_provider.options",
+        lambda: {
+            "provider": "openai",
+            "openai_model": "gpt-4o-mini",
+            "openrouter_model": "auto",
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.ai.ai_provider.set_role",
+        lambda value: captured.setdefault("role", value),
+    )
+    resume = (await client.get("/api/resumes")).json()[0]
+    response = await client.post("/api/ai/session/start", json={"resume_id": resume["id"]})
+    assert response.status_code == 200
+    assert response.json()["channel"] == "openai"
+    assert resume["name"] in captured["role"]
+    assert "не выдумывай" in captured["role"].lower()

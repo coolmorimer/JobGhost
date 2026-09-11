@@ -196,6 +196,8 @@ async def send_application(
         raise ValueError("Application not found")
     if app.status == "APPLIED":
         raise ValueError("Duplicate application")
+    if app.status in {"SENDING", "NEEDS_REVIEW"}:
+        raise ValueError("Результат предыдущего отклика требует ручной проверки на HH; повтор заблокирован")
     if not app.resume_id:
         raise ValueError("Resume required")
     resume = await db.get(Resume, app.resume_id)
@@ -260,9 +262,17 @@ async def send_application(
             raise ValueError("HH resume required")
         from app.connectors.hh_browser import hh_browser
 
-        provider_id = (
-            await hh_browser.apply(vacancy.url, resume.hh_resume_id, app.cover_letter)
-        )["id"]
+        app.status = "SENDING"
+        await db.commit()
+        try:
+            provider_id = (
+                await hh_browser.apply(vacancy.url, resume.hh_resume_id, app.cover_letter)
+            )["id"]
+        except Exception:
+            app.status = "NEEDS_REVIEW"
+            await audit(db, "application_requires_review", app.id)
+            await db.commit()
+            raise
     else:
         raise ValueError("Provider dispatch is not available through this runtime")
     app.status = "APPLIED"

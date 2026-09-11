@@ -51,7 +51,7 @@ async def test_failure_preserves_draft(client, monkeypatch):
     async def fail(*args):
         raise ValueError("login blocked")
 
-    monkeypatch.setattr("app.api.letters.chat_browser.ask", fail)
+    monkeypatch.setattr("app.api.letters.generate_letter", fail)
     assert (
         await client.post(f"/api/application-letters/{aid}/generate", json={})
     ).status_code == 409
@@ -64,9 +64,9 @@ async def test_generation_requires_review(client, monkeypatch):
     aid = await fixture()
 
     async def generate(*args):
-        return {"answer": "Тестовое письмо без отправки. " * 25}
+        return "Тестовое письмо без отправки. " * 25
 
-    monkeypatch.setattr("app.api.letters.chat_browser.ask", generate)
+    monkeypatch.setattr("app.api.letters.generate_letter", generate)
     response = await client.post(f"/api/application-letters/{aid}/generate", json={})
     assert response.status_code == 200
     assert response.json()["requires_review"]

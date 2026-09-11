@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('jobghostDesktop',{
   quit:()=>ipcRenderer.invoke('jobghost:quit'),
   setOverlay:options=>ipcRenderer.invoke('jobghost:overlay',options),
   setCapture:active=>ipcRenderer.invoke('jobghost:capture',active),
+  captureRegion:()=>ipcRenderer.invoke('jobghost:capture-region'),
   getState:()=>ipcRenderer.invoke('jobghost:window-state'),
   setCompact:value=>ipcRenderer.invoke('jobghost:set-compact',value),
   setCompactHeight:value=>ipcRenderer.invoke('jobghost:set-compact-height',value),

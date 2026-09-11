@@ -10,7 +10,8 @@ app.whenReady().then(async()=>{
   try{
     sourceWindow=new BrowserWindow({show:true,width:720,height:420,title:'JobGhost Capture Fixture',webPreferences:{sandbox:true}});
     await sourceWindow.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<style>body{margin:0;background:#111827;color:#eef2ff;font:30px system-ui;display:grid;place-items:center;height:100vh}main{text-align:center}b{color:#9b8cff}</style><main><b>JOBGHOST_SCREEN_OK</b><p>Проверка захвата окна</p></main>'));
-    await new Promise(resolve=>setTimeout(resolve,400));
+    sourceWindow.show();sourceWindow.setAlwaysOnTop(true);sourceWindow.focus();
+    await new Promise(resolve=>setTimeout(resolve,1200));
     const sources=await desktopCapturer.getSources({types:['window'],thumbnailSize:{width:720,height:420},fetchWindowIcons:false});
     const source=sources.find(item=>item.name.includes('JobGhost Capture Fixture'));
     assert.ok(source,'temporary JobGhost window must be available to desktopCapturer');
