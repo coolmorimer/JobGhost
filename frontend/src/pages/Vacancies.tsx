@@ -14,7 +14,7 @@ export function Vacancies() {
   const {data = [], error} = useQuery({queryKey: ['vacancies'], queryFn: api.vacancies});
   const visible = data.filter(v => (v.title + v.company).toLowerCase().includes(term.toLowerCase()));
   return <>
-    <header><div><span className="eyebrow">ВОЗМОЖНОСТИ</span><h1>Вакансии</h1><p>Реальные результаты HH и ранее сохранённые вакансии.</p></div></header>
+    <header><div><span className="eyebrow">ПОИСК РАБОТЫ</span><h1>Автопилот HH</h1><p>Подключите HH, выберите резюме и запустите подготовку черновиков.</p></div></header>
     <HHBrowserPanel/>
     <AutopilotPanel/>
     <div className="toolbar"><label><Search/><input value={term} onChange={e => setTerm(e.target.value)} placeholder="Фильтр сохранённых вакансий"/></label><span>{visible.length} вакансий</span></div>

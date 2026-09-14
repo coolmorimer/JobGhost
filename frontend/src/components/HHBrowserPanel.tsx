@@ -18,22 +18,20 @@ export function HHBrowserPanel() {
   const search = useMutation({mutationFn: () => hhRequest('/search', {query}), onSuccess: () => qc.invalidateQueries({queryKey: ['vacancies']})});
   const resumes = useMutation({mutationFn: () => hhRequest('/resumes/import', {})});
   const busy = open.isPending || search.isPending || resumes.isPending;
-  return <section className="panel" style={{padding: 20, marginBottom: 20}}>
-    <h2>HH — обычный браузер, без API</h2>
-    <p>Войдите в отдельном окне Microsoft Edge. Вход сохраняется локально. Пароль и SMS вводите только на HH.</p>
-    <p role="status">{status.data?.message || 'Проверка подключения…'}</p>
-    <div className="toolbar">
-      <button disabled={busy} onClick={() => open.mutate()}>Открыть вход в HH</button>
-      <button className="secondary" disabled={busy} onClick={() => status.refetch()}>Я вошёл — проверить</button>
-      <button className="secondary" disabled={busy} onClick={() => resumes.mutate()}>Прочитать мои резюме</button>
-      <input aria-label="Запрос поиска HH" value={query} onChange={e => setQuery(e.target.value)} maxLength={200}/>
-      <button disabled={busy || !query.trim()} onClick={() => search.mutate()}>{search.isPending ? 'Читаю HH…' : 'Найти на HH'}</button>
+  const connected=status.data?.state==='connected';
+  return <section className="panel hh-connect-panel">
+    <div className="section-heading"><div><span className="step-number">1</span><div><h2>Подключите HH</h2><p>Вход хранится только в локальном браузере JobGhost.</p></div></div><span className={connected?'state-pill state-ok':'state-pill'}>{connected?'HH подключён':status.data?.message || 'Проверка…'}</span></div>
+    <div className="pilot-actions">
+      <button disabled={busy} onClick={() => open.mutate()}>{connected?'Открыть HH':'Открыть HH и войти'}</button>
+      <button className="secondary" disabled={busy} onClick={() => status.refetch()}>Проверить вход</button>
+      <button className="secondary" disabled={busy || !connected} onClick={() => resumes.mutate()}>{resumes.isPending?'Читаю…':'Обновить резюме'}</button>
     </div>
-    <p>Читается одна страница результатов. Отклики не отправляются. Зарплату и полное описание проверяйте на HH.</p>
+    <small>Пароль, SMS и капчу вводите только на hh.ru. JobGhost не хранит их и не обходит проверки.</small>
+    <details className="advanced-settings"><summary>Разовый поиск вручную</summary><div className="toolbar"><input aria-label="Запрос поиска HH" value={query} onChange={e => setQuery(e.target.value)} maxLength={200}/><button disabled={busy || !query.trim() || !connected} onClick={() => search.mutate()}>{search.isPending ? 'Читаю HH…' : 'Найти вакансии'}</button></div><small>Только читает одну страницу выдачи. Отклики не отправляются.</small></details>
     {search.data && <p role="status">{search.data.message}</p>}
     {resumes.data && <div role="status"><p>{resumes.data.message}</p>{resumes.data.resumes.map((r: {id: string; name: string}) => <p key={r.id}>{r.name}</p>)}</div>}
     {resumes.error && <p role="alert">{resumes.error.message}</p>}
-    {(open.error || search.error || status.error) && <p role="alert">{(open.error || search.error || status.error)?.message}</p>}
+    {(open.error || search.error || status.error) && <div className="action-alert" role="alert"><b>Не удалось подключиться к HH</b><span>{(open.error || search.error || status.error)?.message}</span></div>}
   </section>;
 }
 

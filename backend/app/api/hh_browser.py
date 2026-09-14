@@ -113,6 +113,30 @@ async def import_search(data: SearchInput, db: AsyncSession):
             if isinstance(exc, ValueError)
             else "HH не ответил. Проверьте браузер и повторите.",
         ) from exc
+    return await import_vacancy_rows(rows, db, "Карточки поиска, без AI-оценки")
+
+
+class RecommendationsInput(BaseModel):
+    resume_id: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/recommendations")
+async def import_recommendations(data: RecommendationsInput, db: AsyncSession = Depends(get_db)):
+    resume = await db.get(Resume, data.resume_id)
+    if not resume or not resume.is_active or not resume.hh_resume_id:
+        raise HTTPException(409, "Выберите действующее резюме, импортированное из HH")
+    try:
+        rows = await hh_browser.recommendations(resume.hh_resume_id)
+    except (BrowserError, ValueError) as exc:
+        raise HTTPException(
+            409, str(exc) if isinstance(exc, ValueError) else "HH не ответил"
+        ) from exc
+    return await import_vacancy_rows(
+        rows, db, "Рекомендации, которые HH показал для выбранного резюме"
+    )
+
+
+async def import_vacancy_rows(rows: list[dict], db: AsyncSession, source_label: str):
     saved = 0
     vacancy_ids = []
     for row in rows:
@@ -134,7 +158,7 @@ async def import_search(data: SearchInput, db: AsyncSession):
         "found": len(rows),
         "saved": saved,
         "vacancy_ids": vacancy_ids,
-        "message": f"HH: найдено {len(rows)}, добавлено {saved}. Карточки поиска, без AI-оценки.",
+        "message": f"HH: найдено {len(rows)}, добавлено {saved}. {source_label}.",
     }
 
 

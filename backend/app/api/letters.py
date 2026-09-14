@@ -31,6 +31,27 @@ async def generate_letter(prompt: str) -> str:
     return text
 
 
+async def generate_valid_letter(prompt: str, resume: Resume, vacancy: Vacancy) -> str:
+    """Generate a factual letter and give the model one bounded repair attempt."""
+    text = await generate_letter(prompt)
+    try:
+        validate_generated_letter(text, resume, vacancy)
+        return text
+    except ValueError as first_error:
+        repair_prompt = (
+            prompt
+            + "\n\nПРЕДЫДУЩАЯ ВЕРСИЯ НЕ ПРОШЛА ПРОВЕРКУ: "
+            + str(first_error)
+            + "\nПерепиши письмо целиком. Требуемая длина 750–1000 символов. "
+            "Удали неподтверждённые числа, заполнители и служебные упоминания ИИ. "
+            "Верни только исправленное письмо.\nПРЕДЫДУЩИЙ ТЕКСТ:\n"
+            + text[:1600]
+        )
+        repaired = await generate_letter(repair_prompt)
+        validate_generated_letter(repaired, resume, vacancy)
+        return repaired
+
+
 class LetterInput(BaseModel):
     text: str = Field(min_length=1, max_length=1200)
 
@@ -119,8 +140,7 @@ async def generate(application_id: str, db: AsyncSession = Depends(get_db)):
             raise HTTPException(409, "Сначала прочитайте полное описание вакансии HH")
         old_text = application.cover_letter
         try:
-            text = await generate_letter(build_prompt(resume, vacancy))
-            validate_generated_letter(text, resume, vacancy)
+            text = await generate_valid_letter(build_prompt(resume, vacancy), resume, vacancy)
         except (ValueError, BrowserError, AIProviderError, httpx.HTTPError) as exc:
             raise HTTPException(
                 409, (f"Письмо не создано: {str(exc)[:400]}. Предыдущий текст сохранён." if isinstance(exc, ValueError)

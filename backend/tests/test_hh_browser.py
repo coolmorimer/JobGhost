@@ -1,6 +1,11 @@
 import pytest
 
-from app.connectors.hh_browser import HHBrowser, response_form_url, vacancy_url
+from app.connectors.hh_browser import (
+    HHBrowser,
+    recommendations_url,
+    response_form_url,
+    vacancy_url,
+)
 
 
 async def test_sent_confirmation_normalizes_nonbreaking_space():
@@ -19,10 +24,37 @@ async def test_sent_confirmation_normalizes_nonbreaking_space():
 
 
 def test_response_form_requires_exact_vacancy():
-    assert response_form_url("/applicant/vacancy_response?vacancyId=123", "https://hh.ru/vacancy/123") == "https://hh.ru/applicant/vacancy_response?vacancyId=123"
-    for href in ["", "https://evil.com/applicant/vacancy_response?vacancyId=123", "/applicant/vacancy_response?vacancyId=456", "/vacancy/123", "/applicant/vacancy_response?vacancyId=123&vacancyId=456"]:
+    assert (
+        response_form_url("/applicant/vacancy_response?vacancyId=123", "https://hh.ru/vacancy/123")
+        == "https://hh.ru/applicant/vacancy_response?vacancyId=123"
+    )
+    for href in [
+        "",
+        "https://evil.com/applicant/vacancy_response?vacancyId=123",
+        "/applicant/vacancy_response?vacancyId=456",
+        "/vacancy/123",
+        "/applicant/vacancy_response?vacancyId=123&vacancyId=456",
+    ]:
         with pytest.raises(ValueError):
             response_form_url(href, "https://hh.ru/vacancy/123")
+
+
+def test_recommendations_url_is_read_only_hh_page():
+    assert (
+        recommendations_url("/applicant/resumes/recommendations?resume=abc")
+        == "https://hh.ru/applicant/resumes/recommendations?resume=abc"
+    )
+    assert (
+        recommendations_url("https://ulyanovsk.hh.ru/search/vacancy?resume=abc&hhtmFrom=resume")
+        == "https://ulyanovsk.hh.ru/search/vacancy?resume=abc&hhtmFrom=resume"
+    )
+    for href in (
+        "https://evil.com/applicant/resumes/recommendations",
+        "/applicant/vacancy_response?vacancyId=123",
+        "/account/login",
+    ):
+        with pytest.raises(ValueError):
+            recommendations_url(href)
 
 
 @pytest.mark.parametrize(
@@ -75,3 +107,9 @@ async def test_search_import_deduplicated(client, monkeypatch):
     assert (await client.post("/api/hh-browser/search", json={"query": "Python"})).json()[
         "saved"
     ] == 0
+
+
+async def test_recommendations_require_exact_hh_resume(client, monkeypatch):
+    assert (
+        await client.post("/api/hh-browser/recommendations", json={"resume_id": "missing"})
+    ).status_code == 409

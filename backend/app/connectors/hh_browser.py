@@ -9,7 +9,9 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 from playwright.async_api import BrowserContext, Page, Playwright, TimeoutError, async_playwright
 
 RESPONSE_BUTTON = '[data-qa="vacancy-response-link-top"], [data-qa="vacancy-response-link-bottom"]'
-LETTER_FIELD = 'textarea[data-qa*="letter"], textarea[name*="letter"], textarea[placeholder*="сопровод" i]'
+LETTER_FIELD = (
+    'textarea[data-qa*="letter"], textarea[name*="letter"], textarea[placeholder*="сопровод" i]'
+)
 LETTER_TOGGLE = '[data-qa*="letter-toggle"], button:has-text("Сопроводительное письмо"), button:has-text("Добавить письмо")'
 FINAL_SUBMIT = '[data-qa="vacancy-response-submit-popup"], [data-qa*="response-submit"]'
 
@@ -29,17 +31,44 @@ def response_form_url(href: str, vacancy: str) -> str:
     target = urljoin("https://hh.ru", href)
     parsed = urlsplit(target)
     vacancy_id = vacancy_url(vacancy).rsplit("/", 1)[1]
-    if (parsed.scheme != "https" or parsed.hostname != "hh.ru"
-            or parsed.port not in (None, 443) or parsed.username
-            or parsed.path != "/applicant/vacancy_response"
-            or parse_qs(parsed.query).get("vacancyId") != [vacancy_id]):
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "hh.ru"
+        or parsed.port not in (None, 443)
+        or parsed.username
+        or parsed.path != "/applicant/vacancy_response"
+        or parse_qs(parsed.query).get("vacancyId") != [vacancy_id]
+    ):
         raise ValueError("Не удалось подтвердить безопасную форму отклика HH; откройте её вручную")
+    return target
+
+
+def recommendations_url(href: str) -> str:
+    """Accept only a read-only HH recommendations page discovered in the UI."""
+    target = urljoin("https://hh.ru", href)
+    parsed = urlsplit(target)
+    host = parsed.hostname or ""
+    query = parse_qs(parsed.query)
+    dedicated_page = parsed.path == "/applicant/resumes/recommendations"
+    resume_search = parsed.path == "/search/vacancy" and len(query.get("resume", [])) == 1
+    if (
+        parsed.scheme != "https"
+        or not (host == "hh.ru" or host.endswith(".hh.ru"))
+        or parsed.port not in (None, 443)
+        or parsed.username
+        or not (dedicated_page or resume_search)
+    ):
+        raise ValueError("HH не показал безопасную ссылку на рекомендованные вакансии")
     return target
 
 
 class HHBrowser:
     def __init__(self) -> None:
-        self.path = Path(os.environ['JOBGHOST_USER_DATA']) / 'browser/hh' if os.environ.get('JOBGHOST_USER_DATA') else Path(__file__).resolve().parents[3] / '.jobghost/browser/hh'
+        self.path = (
+            Path(os.environ["JOBGHOST_USER_DATA"]) / "browser/hh"
+            if os.environ.get("JOBGHOST_USER_DATA")
+            else Path(__file__).resolve().parents[3] / ".jobghost/browser/hh"
+        )
         self.lock = asyncio.Lock()
         self.runtime: Playwright | None = None
         self.context: BrowserContext | None = None
@@ -138,41 +167,72 @@ class HHBrowser:
             current = await self.status()
             if current["state"] in ("manual_action", "login_required"):
                 raise ValueError(current["message"])
-            rows = await page.locator('a[href*="/vacancy/"]').evaluate_all("""links => links.filter(a => a.innerText.trim()).map(a => {
+            return await self._vacancy_cards(page, query=query, source="visible_search_card")
+
+    async def recommendations(self, resume_id: str) -> list[dict]:
+        """Read the vacancy list HH recommends for one exact resume."""
+        if not re.fullmatch(r"[a-zA-Z0-9]+", resume_id):
+            raise ValueError("Некорректный идентификатор резюме HH")
+        async with self.lock:
+            page = await self._page()
+            await page.goto(f"https://hh.ru/resume/{resume_id}", wait_until="domcontentloaded")
+            current = await self.status()
+            if current["state"] in ("manual_action", "login_required"):
+                raise ValueError(current["message"])
+            links = page.get_by_role(
+                "link", name=re.compile(r"подобрал.*(?:подходящ|ваканс)", re.I)
+            )
+            if not await links.count():
+                links = page.locator('a[href*="/search/vacancy"][href*="resume="]')
+            if not await links.count():
+                raise ValueError(
+                    "HH не показал рекомендации для выбранного резюме. Откройте резюме на HH и проверьте блок подходящих вакансий."
+                )
+            href = await links.first.get_attribute("href")
+            target = recommendations_url(href or "")
+            await page.goto(target, wait_until="domcontentloaded")
+            await page.locator("body").wait_for()
+            current = await self.status()
+            if current["state"] in ("manual_action", "login_required"):
+                raise ValueError(current["message"])
+            return await self._vacancy_cards(
+                page, query="Рекомендации HH", source="visible_hh_recommendations"
+            )
+
+    async def _vacancy_cards(self, page: Page, *, query: str, source: str) -> list[dict]:
+        rows = await page.locator('a[href*="/vacancy/"]').evaluate_all("""links => links.filter(a => a.innerText.trim()).map(a => {
                 let card = a.parentElement;
                 for (let i=0; i<8 && card && !card.querySelector('a[href*="/employer/"]'); i++) card=card.parentElement;
                 const companies = card ? [...card.querySelectorAll('a[href*="/employer/"]')].map(e=>e.innerText.trim()).filter(Boolean) : [];
                 return {url:a.href,title:a.innerText.trim(),company:companies.at(-1) || '',description:card?.innerText || ''};
             })""")
-            result: dict[str, dict] = {}
-            for row in rows:
-                try:
-                    url = vacancy_url(row["url"])
-                except ValueError:
-                    continue
-                external_id = url.rsplit("/", 1)[1]
-                result.setdefault(
-                    external_id,
-                    {
-                        "external_id": external_id,
-                        "provider": "hh_browser",
-                        "currency": "",
-                        "url": url,
-                        "title": row["title"][:300],
-                        "company": row["company"][:250],
-                        "description": row["description"][:12000],
-                        "remote": "Можно удалённо" in row["description"],
-                        "raw_data": {"source": "visible_search_card", "query": query},
-                    },
-                )
-            if not result and not re.search(
-                r"ничего не найдено|найдено 0|не нашли",
-                (await page.locator("body").inner_text()).lower(),
-            ):
-                raise ValueError(
-                    "HH не показал карточки. Проверьте окно браузера и повторите поиск."
-                )
-            return list(result.values())[:50]
+        result: dict[str, dict] = {}
+        for row in rows:
+            try:
+                url = vacancy_url(row["url"])
+            except ValueError:
+                continue
+            external_id = url.rsplit("/", 1)[1]
+            result.setdefault(
+                external_id,
+                {
+                    "external_id": external_id,
+                    "provider": "hh_browser",
+                    "currency": "",
+                    "url": url,
+                    "title": row["title"][:300],
+                    "company": row["company"][:250],
+                    "description": row["description"][:12000],
+                    "remote": "Можно удалённо" in row["description"],
+                    "raw_data": {"source": source, "query": query},
+                },
+            )
+        if not result and not re.search(
+            r"ничего не найдено|найдено 0|не нашли",
+            (await page.locator("body").inner_text()).lower(),
+        ):
+            raise ValueError("HH не показал карточки. Проверьте окно браузера и повторите поиск.")
+        return list(result.values())[:50]
 
     async def open_vacancy(self, url: str) -> dict:
         url = vacancy_url(url)
@@ -362,11 +422,16 @@ class HHBrowser:
 
             async def guard(route):
                 request = route.request
-                if (request.method not in {"GET", "HEAD", "OPTIONS"}
-                        or "vacancy_response" in urlsplit(request.url).path):
+                if (
+                    request.method not in {"GET", "HEAD", "OPTIONS"}
+                    or "vacancy_response" in urlsplit(request.url).path
+                ):
                     # Analytics POSTs may fire while opening a local modal.
                     # Abort those too, but do not mistake them for a response.
-                    if re.search(r"response|negotiation|apply", urlsplit(request.url).path, re.I) or request.resource_type == "document":
+                    if (
+                        re.search(r"response|negotiation|apply", urlsplit(request.url).path, re.I)
+                        or request.resource_type == "document"
+                    ):
                         blocked.append(request.url)
                     await route.abort()
                 else:
@@ -379,7 +444,9 @@ class HHBrowser:
             finally:
                 await page.unroute("**/*", guard)
             if blocked:
-                raise ValueError("HH предложил быстрый отклик без проверенной формы. Отправьте его вручную; автоматическая отправка заблокирована.")
+                raise ValueError(
+                    "HH предложил быстрый отклик без проверенной формы. Отправьте его вручную; автоматическая отправка заблокирована."
+                )
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=10000)
             except TimeoutError:
@@ -389,7 +456,9 @@ class HHBrowser:
             if current["state"] in {"login_required", "manual_action"}:
                 raise ValueError(current["message"])
             if await self._response_sent(page):
-                raise ValueError("HH уже показывает отправленный отклик; автоматический повтор остановлен")
+                raise ValueError(
+                    "HH уже показывает отправленный отклик; автоматический повтор остановлен"
+                )
             await self._select_resume(page, resume_id)
             field = page.locator(LETTER_FIELD)
             if not await field.count() or not await field.first.is_visible():
@@ -403,9 +472,7 @@ class HHBrowser:
             await field.first.fill(letter.strip())
             questions = await self._unknown_questions(page)
             if questions:
-                raise ValueError(
-                    "HH запросил дополнительные ответы: " + ", ".join(questions[:3])
-                )
+                raise ValueError("HH запросил дополнительные ответы: " + ", ".join(questions[:3]))
             submit = page.locator(FINAL_SUBMIT).first
             if not await submit.count() or not await submit.is_visible():
                 submit = page.get_by_role(

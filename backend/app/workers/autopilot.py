@@ -2,18 +2,24 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import JSON, String, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.api.hh_browser import SearchInput, search
-from app.api.letters import build_prompt, generate_letter, validate_generated_letter
+from app.api.hh_browser import (
+    RecommendationsInput,
+    SearchInput,
+    import_recommendations,
+    search,
+)
+from app.api.letters import build_prompt, generate_valid_letter
 from app.connectors.hh_browser import hh_browser
 from app.db.models import Application, Base, Resume, Vacancy
 from app.db.session import SessionLocal
 from app.schemas import ApplicationPrepare
-from app.services.core import prepare_application, send_application
+from app.services.core import prepare_application
 
 
 class PilotState(Base):
@@ -24,6 +30,7 @@ class PilotState(Base):
 
 class PilotConfig(BaseModel):
     query: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    source: Literal["recommendations", "search"] = "recommendations"
     interval_minutes: int = Field(default=30, ge=5, le=1440)
     auto_apply: bool = False
     resume_id: str | None = None
@@ -31,12 +38,19 @@ class PilotConfig(BaseModel):
     daily_limit: int = Field(default=5, ge=1, le=50)
     excluded_companies: str = Field(default="", max_length=2000)
     excluded_words: str = Field(default="", max_length=2000)
+    required_words: str = Field(default="python", max_length=2000)
     letter_instructions: str = Field(default="", max_length=2000)
 
     @model_validator(mode="after")
     def resume_required_for_applications(self):
         if self.auto_apply and not self.resume_id:
             raise ValueError("Для автооткликов выберите резюме HH")
+        if self.source == "recommendations" and not self.resume_id:
+            raise ValueError("Для рекомендаций HH выберите резюме")
+        if not self.prepare_only:
+            raise ValueError(
+                "Фоновая отправка отключена: автопилот только готовит черновики для проверки"
+            )
         return self
 
 
@@ -64,8 +78,12 @@ class Autopilot:
     async def restore(self):
         async with SessionLocal() as db:
             row = await db.get(PilotState, "main")
-            if row:
-                self.state = dict(row.data)
+        if row:
+            self.state = dict(row.data)
+        # Old releases could persist unattended sending. Every upgrade fails closed.
+        self.state["prepare_only"] = True
+        if self.state.get("auto_apply"):
+            self.state["mode"] = "prepare_drafts"
         if self.state.get("enabled"):
             self.task = asyncio.create_task(self.loop())
 
@@ -82,7 +100,7 @@ class Autopilot:
         async with self.control:
             await self.shutdown()
             self.state.update(config.model_dump())
-            mode = "auto_apply" if config.auto_apply else "search_only"
+            mode = "prepare_drafts" if config.auto_apply else "search_only"
             self.state.update(enabled=True, status="starting", error=None, mode=mode)
             self.state["next_run"] = None
             await self.save()
@@ -102,7 +120,12 @@ class Autopilot:
         await self.save()
         await hh_browser.set_background(True)
         async with SessionLocal() as db:
-            result = await search(SearchInput(query=self.state["query"]), db)
+            if self.state.get("source") == "recommendations":
+                result = await import_recommendations(
+                    RecommendationsInput(resume_id=self.state["resume_id"]), db
+                )
+            else:
+                result = await search(SearchInput(query=self.state["query"]), db)
         if self.state.get("auto_apply"):
             result = {**result, **await self._apply_one(result.get("vacancy_ids", []))}
         stamp = datetime.now(UTC).isoformat()
@@ -119,9 +142,21 @@ class Autopilot:
         skipped = 0
         async with SessionLocal() as db:
             today = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
-            sent = await db.scalar(select(func.count()).select_from(Application).where(Application.sent_at >= today)) or 0
-            if sent >= self.state.get("daily_limit", 5) and not self.state.get("prepare_only"):
-                return {"applied": 0, "skipped": 0, "message": "Достигнут лимит за 24 часа"}
+            prepared = (
+                await db.scalar(
+                    select(func.count())
+                    .select_from(Application)
+                    .where(Application.created_at >= today, Application.mode == "AUTO")
+                )
+                or 0
+            )
+            if prepared >= self.state.get("daily_limit", 5):
+                return {
+                    "applied": 0,
+                    "prepared": 0,
+                    "skipped": 0,
+                    "message": "Достигнут лимит черновиков за 24 часа",
+                }
             resume = await db.get(Resume, resume_id)
             if not resume or not resume.is_active or not resume.hh_resume_id:
                 raise ValueError("Выбранное резюме HH недоступно; автоотклики остановлены")
@@ -136,9 +171,24 @@ class Autopilot:
                 if existing:
                     skipped += 1
                     continue
-                companies = [part.strip().lower() for part in self.state.get("excluded_companies", "").split(",") if part.strip()]
-                words = [part.strip().lower() for part in self.state.get("excluded_words", "").split(",") if part.strip()]
-                if any(part in vacancy.company.lower() for part in companies) or any(part in vacancy.title.lower() for part in words):
+                companies = [
+                    part.strip().lower()
+                    for part in self.state.get("excluded_companies", "").split(",")
+                    if part.strip()
+                ]
+                words = [
+                    part.strip().lower()
+                    for part in self.state.get("excluded_words", "").split(",")
+                    if part.strip()
+                ]
+                required = [
+                    part.strip().lower()
+                    for part in self.state.get("required_words", "").split(",")
+                    if part.strip()
+                ]
+                if any(part in vacancy.company.lower() for part in companies) or any(
+                    part in vacancy.title.lower() for part in words
+                ):
                     skipped += 1
                     continue
                 detail = await hh_browser.read_vacancy(vacancy.url)
@@ -147,37 +197,28 @@ class Autopilot:
                 vacancy.skills = detail["skills"]
                 vacancy.raw_data = {**vacancy.raw_data, "source": detail["source"]}
                 await db.commit()
-                if any(part in (vacancy.title + " " + vacancy.description).lower() for part in words):
+                full_text = (vacancy.title + " " + vacancy.description).lower()
+                if any(part in full_text for part in words):
                     skipped += 1
                     continue
-                application = await prepare_application(
-                    db,
-                    ApplicationPrepare(
-                        vacancy_id=vacancy.id,
-                        resume_id=resume.id,
-                        cover_letter="",
-                        mode="AUTO",
-                    ),
-                )
+                if required and not all(part in full_text for part in required):
+                    skipped += 1
+                    continue
                 prompt = build_prompt(resume, vacancy)
                 instructions = self.state.get("letter_instructions", "").strip()
                 if instructions:
                     prompt += "\nПОЖЕЛАНИЯ К СТИЛЮ (не источник фактов об опыте):\n" + instructions
-                answer = await generate_letter(prompt)
-                validate_generated_letter(answer, resume, vacancy)
-                if not 600 <= len(answer) <= 1200:
-                    raise ValueError(
-                        "ИИ вернул некорректную длину письма; черновик сохранён, проверьте выбранную модель"
-                    )
-                application.cover_letter = answer
-                application.status = "PREPARED"
-                await db.commit()
-                if self.state.get("prepare_only"):
-                    return {"applied": 0, "prepared": 1, "skipped": skipped}
-                await send_application(
-                    db, application.id, confirmed_real=True, require_score=False
+                answer = await generate_valid_letter(prompt, resume, vacancy)
+                await prepare_application(
+                    db,
+                    ApplicationPrepare(
+                        vacancy_id=vacancy.id,
+                        resume_id=resume.id,
+                        cover_letter=answer,
+                        mode="AUTO",
+                    ),
                 )
-                return {"applied": 1, "skipped": skipped}
+                return {"applied": 0, "prepared": 1, "skipped": skipped}
         return {"applied": 0, "skipped": skipped}
 
     async def loop(self):

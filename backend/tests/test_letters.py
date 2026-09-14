@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.letters import validate_generated_letter
+from app.api.letters import generate_valid_letter, validate_generated_letter
 from app.db.models import Application, Resume, Vacancy
 from app.db.session import SessionLocal
 
@@ -13,6 +13,20 @@ def test_letter_rejects_placeholders_and_unsupported_numbers():
     for suffix in [" [Имя]", " Ускорил на 90%."]:
         with pytest.raises(ValueError):
             validate_generated_letter(text + suffix, resume, vacancy)
+
+
+async def test_letter_repairs_invalid_length_once(monkeypatch):
+    resume = Resume(name="Fullstack", description="Python FastAPI React")
+    vacancy = Vacancy(title="Python developer", company="Компания")
+    answers = ["Слишком коротко", "Работаю с Python, FastAPI и React. " * 23]
+
+    async def generate(_prompt):
+        return answers.pop(0)
+
+    monkeypatch.setattr("app.api.letters.generate_letter", generate)
+    result = await generate_valid_letter("Исходная инструкция", resume, vacancy)
+    assert 600 <= len(result) <= 1200
+    assert not answers
 
 
 @pytest.mark.parametrize("provider", ["openai", "openrouter"])
